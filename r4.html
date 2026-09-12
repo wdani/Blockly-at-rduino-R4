@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Blockly@rduino · UNO R4</title>
+    <style>
+        body { font-family: sans-serif; margin: 2rem; }
+        #r4-loader { max-width: 48rem; margin: 4rem auto; line-height: 1.5; }
+        .error { color: #b00020; white-space: pre-wrap; }
+    </style>
+</head>
+<body>
+    <div id="r4-loader">
+        <h1>Blockly@rduino · UNO R4</h1>
+        <p>Loading the UNO R4 edition…</p>
+    </div>
+    <noscript>This R4 bootstrap page requires JavaScript.</noscript>
+
+    <script>
+        (function () {
+            'use strict';
+
+            var currentUrl = new URL(window.location.href);
+            if (!currentUrl.searchParams.has('board')) {
+                currentUrl.searchParams.set('board', 'arduino_uno_r4_wifi');
+                window.history.replaceState({}, '', currentUrl.pathname + currentUrl.search + currentUrl.hash);
+            }
+
+            fetch('./index.html', { cache: 'no-store' })
+                .then(function (response) {
+                    if (!response.ok) {
+                        throw new Error('Could not load index.html (HTTP ' + response.status + ').');
+                    }
+                    return response.text();
+                })
+                .then(function (html) {
+                    // Keep the user in the R4 entry point when pressing Blockly@rduino's reset button.
+                    html = html.replace('href="./index.html" id="btn_reset"', 'href="./r4.html" id="btn_reset"');
+
+                    var injection = '<script src="./r4/uno-r4-profiles.js"><\/script>';
+                    if (html.indexOf('</body>') !== -1) {
+                        html = html.replace('</body>', injection + '\n</body>');
+                    } else {
+                        html += injection;
+                    }
+
+                    document.open();
+                    document.write(html);
+                    document.close();
+                })
+                .catch(function (error) {
+                    var loader = document.getElementById('r4-loader');
+                    loader.innerHTML = '<h1>Blockly@rduino · UNO R4</h1>' +
+                        '<p class="error">' + error.message + '</p>' +
+                        '<p>This bootstrap currently expects to be served over HTTP/HTTPS (for example through GitHub Pages). Direct file:// mode will be handled in the native integration step.</p>';
+                });
+        })();
+    </script>
+</body>
+</html>
