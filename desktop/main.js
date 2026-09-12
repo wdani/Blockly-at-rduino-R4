@@ -2,6 +2,7 @@
 
 const { app, BrowserWindow, ipcMain } = require('electron');
 const { execFile } = require('child_process');
+const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
@@ -10,6 +11,8 @@ const CORE = 'arduino:renesas_uno';
 const DEFAULT_TIMEOUT = 120000;
 
 let mainWindow = null;
+let staticServer = null;
+let staticBaseUrl = null;
 
 function ensureDir(dir) {
     fs.mkdirSync(dir, { recursive: true });
@@ -211,6 +214,122 @@ async function uploadSketch(code, port) {
     };
 }
 
+function mimeTypeFor(filePath) {
+    const ext = path.extname(filePath).toLowerCase();
+    const types = {
+        '.html': 'text/html; charset=utf-8',
+        '.htm': 'text/html; charset=utf-8',
+        '.js': 'text/javascript; charset=utf-8',
+        '.css': 'text/css; charset=utf-8',
+        '.json': 'application/json; charset=utf-8',
+        '.xml': 'application/xml; charset=utf-8',
+        '.svg': 'image/svg+xml',
+        '.png': 'image/png',
+        '.gif': 'image/gif',
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.ico': 'image/x-icon',
+        '.woff': 'font/woff',
+        '.woff2': 'font/woff2',
+        '.ttf': 'font/ttf',
+        '.otf': 'font/otf',
+        '.mp3': 'audio/mpeg',
+        '.wav': 'audio/wav',
+        '.ogg': 'audio/ogg'
+    };
+    return types[ext] || 'application/octet-stream';
+}
+
+function patchedDesktopHtml() {
+    const indexPath = path.join(appPath(), 'index_electron.html');
+    const source = fs.readFileSync(indexPath, 'utf8');
+    const marker = '<script type="text/javascript" src="core/blockly_compressed.js"></script>';
+    const compatTag = '<script type="text/javascript" src="r4/legacy-blockly-pointer-compat.js"></script>';
+
+    if (source.indexOf(marker) === -1) {
+        throw new Error('Blockly core script marker was not found in index_electron.html.');
+    }
+
+    return source.replace(marker, marker + '\n    ' + compatTag);
+}
+
+function resolveStaticFile(requestPath) {
+    let decoded;
+    try {
+        decoded = decodeURIComponent(requestPath || '/');
+    } catch (error) {
+        return null;
+    }
+
+    const relative = decoded.replace(/^\/+/, '');
+    const root = path.resolve(appPath());
+    const resolved = path.resolve(root, relative);
+
+    if (resolved !== root && !resolved.startsWith(root + path.sep)) {
+        return null;
+    }
+
+    return resolved;
+}
+
+function startStaticServer() {
+    return new Promise((resolve, reject) => {
+        staticServer = http.createServer((request, response) => {
+            let requestUrl;
+            try {
+                requestUrl = new URL(request.url, 'http://127.0.0.1');
+            } catch (error) {
+                response.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
+                response.end('Bad request');
+                return;
+            }
+
+            if (requestUrl.pathname === '/' || requestUrl.pathname === '/index_electron.html') {
+                try {
+                    const html = patchedDesktopHtml();
+                    response.writeHead(200, {
+                        'Content-Type': 'text/html; charset=utf-8',
+                        'Cache-Control': 'no-store'
+                    });
+                    response.end(html);
+                } catch (error) {
+                    response.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+                    response.end(error.message);
+                }
+                return;
+            }
+
+            const filePath = resolveStaticFile(requestUrl.pathname);
+            if (!filePath) {
+                response.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
+                response.end('Forbidden');
+                return;
+            }
+
+            fs.stat(filePath, (statError, stat) => {
+                if (statError || !stat.isFile()) {
+                    response.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+                    response.end('Not found');
+                    return;
+                }
+
+                response.writeHead(200, {
+                    'Content-Type': mimeTypeFor(filePath),
+                    'Cache-Control': 'no-store'
+                });
+                fs.createReadStream(filePath).pipe(response);
+            });
+        });
+
+        staticServer.once('error', reject);
+        staticServer.listen(0, '127.0.0.1', () => {
+            const address = staticServer.address();
+            staticBaseUrl = 'http://127.0.0.1:' + address.port;
+            resolve(staticBaseUrl);
+        });
+    });
+}
+
 function injectRendererSupport(win) {
     const profilePath = path.join(appPath(), 'r4', 'uno-r4-profiles.js');
     const bridgePath = path.join(appPath(), 'r4', 'desktop-bridge.js');
@@ -227,7 +346,7 @@ function injectRendererSupport(win) {
         .then(() => win.webContents.executeJavaScript(bridgeCode));
 }
 
-function createWindow() {
+function createWindow(baseUrl) {
     mainWindow = new BrowserWindow({
         width: 1440,
         height: 900,
@@ -245,12 +364,8 @@ function createWindow() {
 
     mainWindow.removeMenu();
 
-    mainWindow.loadFile(path.join(appPath(), 'index_electron.html'), {
-        query: {
-            board: 'arduino_uno_r4_wifi',
-            lang: 'de'
-        }
-    });
+    const pageUrl = baseUrl + '/index_electron.html?board=arduino_uno_r4_wifi&lang=de';
+    mainWindow.loadURL(pageUrl);
 
     mainWindow.webContents.on('did-finish-load', () => {
         injectRendererSupport(mainWindow).catch((error) => {
@@ -269,14 +384,25 @@ ipcMain.handle('r4:list-ports', async () => listPorts());
 ipcMain.handle('r4:compile', async (_event, code) => compileSketch(code));
 ipcMain.handle('r4:upload', async (_event, payload) => uploadSketch(payload.code, payload.port));
 
-app.whenReady().then(() => {
-    createWindow();
+app.whenReady().then(async () => {
+    const baseUrl = await startStaticServer();
+    createWindow(baseUrl);
 
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) {
-            createWindow();
+            createWindow(staticBaseUrl);
         }
     });
+}).catch((error) => {
+    console.error('Blockly@rduino R4 startup failed:', error);
+    app.quit();
+});
+
+app.on('before-quit', () => {
+    if (staticServer) {
+        staticServer.close();
+        staticServer = null;
+    }
 });
 
 app.on('window-all-closed', () => {
