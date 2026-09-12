@@ -1,0 +1,39 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'ch.elekto.blocklyrduino.r4'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'ch.elekto.blocklyrduino.r4'
+        minSdk 26
+        targetSdk 35
+        versionCode 1
+        versionName '0.1.0-alpha.1'
+    }
+}
+
+def generatedBlocklyAssets = layout.buildDirectory.dir('generated/blocklyAssets')
+
+tasks.register('copyBlocklyAssets', Copy) {
+    from(rootProject.projectDir.parentFile) {
+        exclude '.git/**'
+        exclude '.github/**'
+        exclude 'android-app/**'
+        exclude 'desktop/**'
+        exclude 'node_modules/**'
+        exclude 'dist/**'
+        exclude 'release/**'
+        exclude '*.zip'
+    }
+    into(generatedBlocklyAssets.map { new File(it.asFile, 'www') })
+}
+
+android.sourceSets.main.assets.srcDir(generatedBlocklyAssets)
+preBuild.dependsOn(copyBlocklyAssets)
+
+dependencies {
+    implementation 'androidx.webkit:webkit:1.12.1'
+}
