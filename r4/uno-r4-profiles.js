@@ -80,32 +80,39 @@
         }
     );
 
-    var boardSelect = document.getElementById('board_select');
-    if (!boardSelect) {
-        console.error('Blockly@rduino R4: board selector was not found.');
-        return;
-    }
-
-    var arduinoGroup = boardSelect.querySelector('optgroup[label="Arduino"]');
-    if (!arduinoGroup) {
-        console.error('Blockly@rduino R4: Arduino board group was not found.');
-        return;
-    }
-
-    function addBoardOption(value, label) {
-        if (boardSelect.querySelector('option[value="' + value + '"]')) {
+    function installR4BoardOptions() {
+        var boardSelect = document.getElementById('board_select');
+        if (!boardSelect) {
             return;
         }
-        var option = document.createElement('option');
-        option.value = value;
-        option.textContent = label;
-        arduinoGroup.insertBefore(option, arduinoGroup.firstChild);
+
+        var arduinoGroup = boardSelect.querySelector('optgroup[label="Arduino"]');
+        if (!arduinoGroup) {
+            return;
+        }
+
+        function addBoardOption(value, label) {
+            if (boardSelect.querySelector('option[value="' + value + '"]')) {
+                return;
+            }
+            var option = document.createElement('option');
+            option.value = value;
+            option.textContent = label;
+            arduinoGroup.insertBefore(option, arduinoGroup.firstChild);
+        }
+
+        // Insert Minima first so WiFi ends up at the very top.
+        addBoardOption('arduino_uno_r4_minima', 'Arduino UNO R4 Minima');
+        addBoardOption('arduino_uno_r4_wifi', 'Arduino UNO R4 WiFi');
+
+        if (document.title.indexOf('UNO R4') === -1) {
+            document.title += ' · UNO R4';
+        }
     }
 
-    // Insert Minima first so WiFi ends up at the very top and is the obvious
-    // default choice for the Elekto Starter Kit R4 hardware.
-    addBoardOption('arduino_uno_r4_minima', 'Arduino UNO R4 Minima');
-    addBoardOption('arduino_uno_r4_wifi', 'Arduino UNO R4 WiFi');
-
-    document.title = document.title + ' · UNO R4';
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', installR4BoardOptions);
+    } else {
+        installR4BoardOptions();
+    }
 })();
