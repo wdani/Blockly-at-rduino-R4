@@ -1,0 +1,60 @@
+name: Build Windows Desktop
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - desktop/uno-r4-windows
+    paths:
+      - 'desktop/**'
+      - 'r4/**'
+      - 'package.json'
+      - 'index_electron.html'
+      - 'core/**'
+      - 'blocks/**'
+      - 'generators/**'
+      - 'lang/**'
+      - 'css/**'
+      - 'media/**'
+      - '.github/workflows/build-windows-desktop.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Download Arduino CLI 1.5.1
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path desktop/vendor | Out-Null
+          $zip = Join-Path $env:RUNNER_TEMP 'arduino-cli.zip'
+          Invoke-WebRequest -Uri 'https://github.com/arduino/arduino-cli/releases/download/v1.5.1/arduino-cli_1.5.1_Windows_64bit.zip' -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath desktop/vendor -Force
+          if (-not (Test-Path 'desktop/vendor/arduino-cli.exe')) {
+            throw 'arduino-cli.exe was not found after extraction.'
+          }
+          & 'desktop/vendor/arduino-cli.exe' version
+
+      - name: Install desktop dependencies
+        run: npm install
+
+      - name: Build Windows installer
+        run: npm run dist:win
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Blockly-rduino-R4-Windows
+          path: dist/*.exe
+          if-no-files-found: error
