@@ -1,6 +1,6 @@
 {
   "name": "blockly-at-rduino-r4",
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.0-alpha.2",
   "description": "Blockly@rduino desktop fork with Arduino UNO R4 support",
   "main": "desktop/main.js",
   "repository": {
