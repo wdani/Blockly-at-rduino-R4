@@ -38,7 +38,7 @@
                     // Keep the user in the R4 entry point when pressing Blockly@rduino's reset button.
                     html = html.replace('href="./index.html" id="btn_reset"', 'href="./r4.html" id="btn_reset"');
 
-                    var injection = '<script src="./r4/uno-r4-profiles.js"><\\/script>';
+                    var injection = '<script src="./r4/uno-r4-profiles.js"><\/script>';
                     if (html.indexOf('</body>') !== -1) {
                         html = html.replace('</body>', injection + '\n</body>');
                     } else {
