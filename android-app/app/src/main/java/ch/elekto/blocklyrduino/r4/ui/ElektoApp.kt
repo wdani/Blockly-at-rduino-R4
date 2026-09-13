@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
@@ -177,7 +178,8 @@ fun ElektoApp() {
 
     fun detachForDrag(id: String) {
         if (selectionMode && id in selectedBlockIds && selectedBlockIds.size > 1) {
-            detachSelectionForDrag(selectedBlockIds)
+            // Keep relationships untouched while the finger is down. This prevents
+            // the selected group from jumping when a parent/child relation changes.
             return
         }
         val index = blocks.indexOfFirst { it.id == id }
@@ -190,11 +192,12 @@ fun ElektoApp() {
     }
 
     fun moveSelection(ids: Set<String>, dx: Float, dy: Float) {
-        val roots = selectionMoveRoots(ids)
         val movingIds = linkedSetOf<String>()
-        roots.forEach { root ->
-            movingIds += root
-            movingIds += linkedDescendantIds(blocks.toList(), root)
+        ids.forEach { id ->
+            movingIds += id
+            // Children/value blocks belonging to an explicitly selected container/value
+            // move with it even if the child itself was not tapped separately.
+            movingIds += linkedDescendantIds(blocks.toList(), id)
         }
         blocks.indices.forEach { index ->
             val block = blocks[index]
@@ -208,20 +211,23 @@ fun ElektoApp() {
     }
 
     fun finishSelectionMove(ids: Set<String>) {
-        val roots = selectionMoveRoots(ids)
-        val movingIds = linkedSetOf<String>()
-        roots.forEach { root ->
-            movingIds += root
-            movingIds += linkedDescendantIds(blocks.toList(), root)
-        }
+        val selected = ids.toSet()
+
+        // Only now, after the gesture is finished, detach relations that point
+        // outside the selected group. Relations inside the selection stay intact.
         blocks.indices.forEach { index ->
             val block = blocks[index]
-            if (block.id in movingIds) {
-                blocks[index] = block.copy(
-                    xDp = round(block.xDp / 8f) * 8f,
-                    yDp = round(block.yDp / 8f) * 8f
-                )
-            }
+            if (block.id !in selected) return@forEach
+
+            blocks[index] = block.copy(
+                parentId = block.parentId?.takeIf { it in selected },
+                previousId = block.previousId?.takeIf { it in selected },
+                valueOwnerId = block.valueOwnerId?.takeIf { it in selected },
+                valueInputKey = block.valueInputKey?.takeIf { block.valueOwnerId in selected },
+                childOrder = if (block.parentId in selected) block.childOrder else 0,
+                xDp = round(block.xDp / 8f) * 8f,
+                yDp = round(block.yDp / 8f) * 8f
+            )
         }
         persist()
     }
@@ -380,13 +386,25 @@ fun ElektoApp() {
                     Column {
                         Text("Elekto Blocks", fontWeight = FontWeight.SemiBold)
                         Text(
-                            "UNO R4 WiFi • Alpha 9 • lokal",
+                            "UNO R4 WiFi • Alpha 10 • lokal",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 },
                 actions = {
+                    IconButton(
+                        onClick = {
+                            selectionMode = !selectionMode
+                            if (!selectionMode) selectedBlockIds = emptySet()
+                        }
+                    ) {
+                        Icon(
+                            Icons.Default.SelectAll,
+                            contentDescription = if (selectionMode) "Mehrfachauswahl beenden" else "Mehrfachauswahl",
+                            tint = if (selectionMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     IconButton(onClick = { showCode = true }) {
                         Icon(Icons.Default.Code, contentDescription = "Arduino-Code anzeigen")
                     }
@@ -395,14 +413,6 @@ fun ElektoApp() {
                             Icon(Icons.Default.MoreVert, contentDescription = "Mehr")
                         }
                         DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                            DropdownMenuItem(
-                                text = { Text(if (selectionMode) "Mehrfachauswahl beenden" else "Mehrfachauswahl") },
-                                onClick = {
-                                    showMenu = false
-                                    selectionMode = !selectionMode
-                                    if (!selectionMode) selectedBlockIds = emptySet()
-                                }
-                            )
                             DropdownMenuItem(
                                 text = { Text("Blink-Demo laden") },
                                 onClick = {
@@ -444,7 +454,10 @@ fun ElektoApp() {
                 selectionMode = selectionMode,
                 selectedBlockIds = selectedBlockIds,
                 onToggleSelection = ::toggleSelection,
-                onMoveStart = ::detachForDrag,
+                onMoveStart = { id ->
+                    draggingBlockId = id
+                    detachForDrag(id)
+                },
                 onMove = ::moveWithConnections,
                 onMoveFinished = ::finishMove,
                 onEdit = { editingBlock = it },
