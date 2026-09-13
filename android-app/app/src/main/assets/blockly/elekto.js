@@ -192,6 +192,15 @@
     }
   }
 
+  const workspaceHost = document.getElementById('workspace');
+  function sizeWorkspaceHost() {
+    const w = Math.max(1, window.innerWidth || document.documentElement.clientWidth || 360);
+    const h = Math.max(1, window.innerHeight || document.documentElement.clientHeight || 640);
+    workspaceHost.style.width = w + 'px';
+    workspaceHost.style.height = h + 'px';
+  }
+  sizeWorkspaceHost();
+
   const workspace = Blockly.inject('workspace', {
     toolbox,
     theme: elektoTheme,
@@ -396,7 +405,11 @@
   setTimeout(() => renderDiagnostics(workspace, 'nach Demo/Restore'), 50);
   window.__ELEKTO_READY = true;
   if (window.__elektoBootStatus) window.__elektoBootStatus('Elekto-Editor READY – Diagnose unten');
-  window.addEventListener('resize', () => Blockly.svgResize(workspace));
+  window.addEventListener('resize', () => {
+    sizeWorkspaceHost();
+    Blockly.svgResize(workspace);
+    workspace.resizeContents?.();
+  });
   } catch (error) {
     console.error(error);
     showFatal(error);
