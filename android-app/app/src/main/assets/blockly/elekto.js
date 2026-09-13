@@ -163,34 +163,6 @@
     ]
   };
 
-  function renderDiagnostics(workspace, label) {
-    let box = document.getElementById('diag');
-    if (!box) {
-      box = document.createElement('div');
-      box.id = 'diag';
-      box.style.cssText = 'position:fixed;left:8px;bottom:8px;z-index:999999;background:rgba(20,20,24,.92);color:#fff;border-radius:10px;padding:8px 10px;font:11px/1.35 monospace;max-width:94vw;pointer-events:none;white-space:pre-wrap';
-      document.body.appendChild(box);
-    }
-    try {
-      const host = document.getElementById('workspace');
-      const svg = host?.querySelector('svg');
-      const toolbox = document.querySelector('.blocklyToolboxDiv');
-      const flyout = document.querySelector('.blocklyFlyout');
-      const metrics = workspace?.getMetrics ? workspace.getMetrics() : null;
-      const blocks = workspace?.getAllBlocks ? workspace.getAllBlocks(false).length : -1;
-      box.textContent =
-        label +
-        '\nhost=' + (host?.clientWidth || 0) + 'x' + (host?.clientHeight || 0) +
-        ' svg=' + (svg?.clientWidth || 0) + 'x' + (svg?.clientHeight || 0) +
-        '\nblocks=' + blocks +
-        ' toolbox=' + !!toolbox +
-        ' flyout=' + !!flyout +
-        '\nscale=' + (workspace?.scale ?? '?') +
-        (metrics ? '\nview=' + Math.round(metrics.viewWidth) + 'x' + Math.round(metrics.viewHeight) : '');
-    } catch (e) {
-      box.textContent = 'DIAG ERROR: ' + e;
-    }
-  }
 
   const workspaceHost = document.getElementById('workspace');
   function sizeWorkspaceHost() {
@@ -221,16 +193,6 @@
   });
 
   Blockly.svgResize(workspace);
-  renderDiagnostics(workspace, 'nach inject');
-  setTimeout(() => {
-    Blockly.svgResize(workspace);
-    renderDiagnostics(workspace, 'nach 500 ms');
-  }, 500);
-  setTimeout(() => {
-    Blockly.svgResize(workspace);
-    workspace.resizeContents?.();
-    renderDiagnostics(workspace, 'nach 1500 ms');
-  }, 1500);
 
   function valueCode(block, inputName, fallback) {
     const child = block.getInputTargetBlock(inputName);
@@ -402,9 +364,7 @@
   };
 
   if (!restore()) loadDemo();
-  setTimeout(() => renderDiagnostics(workspace, 'nach Demo/Restore'), 50);
   window.__ELEKTO_READY = true;
-  if (window.__elektoBootStatus) window.__elektoBootStatus('Elekto-Editor READY – Diagnose unten');
   window.addEventListener('resize', () => {
     sizeWorkspaceHost();
     Blockly.svgResize(workspace);
