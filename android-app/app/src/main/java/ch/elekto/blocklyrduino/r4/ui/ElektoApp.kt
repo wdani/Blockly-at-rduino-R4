@@ -186,6 +186,7 @@ fun ElektoApp() {
         if (current.parentId != null || current.previousId != null || current.valueOwnerId != null) {
             blocks[index] = current.copy(parentId = null, previousId = null, childOrder = 0, valueOwnerId = null, valueInputKey = null)
         }
+        // Keep absolute coordinates while dragging. Normalizing here made nested blocks jump away from the finger.
     }
 
     fun moveSelection(ids: Set<String>, dx: Float, dy: Float) {
