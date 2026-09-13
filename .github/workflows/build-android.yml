@@ -3,7 +3,7 @@ name: Build Android APK
 on:
   push:
     branches:
-      - android/uno-r4-app
+      - android/blockly-modern-poc
   workflow_dispatch:
 
 jobs:
@@ -40,12 +40,27 @@ jobs:
             -name elektoAlpha \
             -passout pass:android
 
-      - name: Build native Alpha 11 APK
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: android-app/blockly-package/package-lock.json
+
+      - name: Prepare Blockly 13.3.0 assets
+        run: |
+          npm ci --prefix android-app/blockly-package
+          mkdir -p android-app/app/src/main/assets/blockly/vendor/msg
+          cp android-app/blockly-package/node_modules/blockly/blockly_compressed.js android-app/app/src/main/assets/blockly/vendor/
+          cp android-app/blockly-package/node_modules/blockly/blocks_compressed.js android-app/app/src/main/assets/blockly/vendor/
+          cp android-app/blockly-package/node_modules/blockly/msg/de.js android-app/app/src/main/assets/blockly/vendor/msg/
+
+      - name: Build Blockly POC APK
         run: gradle -p android-app :app:assembleDebug
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Elekto-Blocks-Android-alpha11-palette-drag
+          name: Elekto-Blocks-Blockly-modern-POC
           path: android-app/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
