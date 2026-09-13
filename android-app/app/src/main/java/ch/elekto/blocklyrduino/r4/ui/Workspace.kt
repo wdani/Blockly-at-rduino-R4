@@ -187,6 +187,9 @@ fun BlockWorkspace(
     blocks: List<ProgramBlock>,
     errorBlockIds: Set<String>,
     draggingBlockId: String?,
+    selectionMode: Boolean,
+    selectedBlockIds: Set<String>,
+    onToggleSelection: (id: String) -> Unit,
     onMoveStart: (id: String) -> Unit,
     onMove: (id: String, deltaXDp: Float, deltaYDp: Float) -> Unit,
     onMoveFinished: (id: String) -> Unit,
@@ -231,20 +234,27 @@ fun BlockWorkspace(
                         }
                     }
 
-                    SnapPreviewOverlay(blocks = blocks, draggingBlockId = draggingBlockId)
+                    val activeSnapTarget = draggingBlockId?.let { findSnapTarget(blocks, it) }
 
                     blocks.sortedBy { nestingDepth(it, blocks) }.forEach { block ->
                         NativeProgramBlock(
                             block = block,
                             allBlocks = blocks,
                             hasError = block.id in errorBlockIds,
+                            isDragging = block.id == draggingBlockId,
+                            hasActiveSnapTarget = block.id == draggingBlockId && activeSnapTarget != null,
+                            isSelected = block.id in selectedBlockIds,
+                            selectionMode = selectionMode,
                             zoom = zoom,
+                            onToggleSelection = onToggleSelection,
                             onMoveStart = onMoveStart,
                             onMove = onMove,
                             onMoveFinished = onMoveFinished,
                             onEdit = { onEdit(block) }
                         )
                     }
+
+                    SnapPreviewOverlay(blocks = blocks, draggingBlockId = draggingBlockId)
                 }
             }
         }
@@ -275,9 +285,9 @@ private fun SnapPreviewOverlay(blocks: List<ProgramBlock>, draggingBlockId: Stri
             }
             .width(width)
             .height(height)
-            .border(2.dp, MaterialTheme.colorScheme.primary, shape),
+            .border(4.dp, Color(0xFF65B5FF), shape),
         shape = shape,
-        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
+        color = Color(0xFF65B5FF).copy(alpha = 0.22f),
         shadowElevation = 0.dp
     ) {}
 }
@@ -334,7 +344,12 @@ private fun NativeProgramBlock(
     block: ProgramBlock,
     allBlocks: List<ProgramBlock>,
     hasError: Boolean,
+    isDragging: Boolean,
+    hasActiveSnapTarget: Boolean,
+    isSelected: Boolean,
+    selectionMode: Boolean,
     zoom: Float,
+    onToggleSelection: (id: String) -> Unit,
     onMoveStart: (id: String) -> Unit,
     onMove: (id: String, deltaXDp: Float, deltaYDp: Float) -> Unit,
     onMoveFinished: (id: String) -> Unit,
@@ -353,6 +368,7 @@ private fun NativeProgramBlock(
             }
             .width(widthDp)
             .height(heightDp)
+            .graphicsLayer { alpha = if (isDragging && hasActiveSnapTarget) 0.52f else 1f }
             .pointerInput(block.id, zoom) {
                 detectDragGestures(
                     onDragStart = { onMoveStart(block.id) },
@@ -363,11 +379,12 @@ private fun NativeProgramBlock(
                     onMove(block.id, dragAmount.x / (density * zoom), dragAmount.y / (density * zoom))
                 }
             }
-            .clickable(onClick = onEdit)
+            .clickable { if (selectionMode) onToggleSelection(block.id) else onEdit() }
     ) {
         Surface(
             modifier = Modifier
                 .fillMaxSize()
+                .then(if (isSelected) Modifier.border(4.dp, Color(0xFF65B5FF), shape) else Modifier)
                 .then(if (hasError) Modifier.border(3.dp, MaterialTheme.colorScheme.error, shape) else Modifier),
             shape = shape,
             color = blockColor(block.type),
@@ -533,6 +550,10 @@ private fun ValueSocket(
         ValueType.BOOLEAN -> BooleanValueShape
         else -> NumberValueShape
     }
+    if (connected) {
+        Box(modifier = modifier.width(widthDp.dp).height(ValueHeightDp.dp))
+        return
+    }
     Surface(
         modifier = modifier
             .width(widthDp.dp)
@@ -541,10 +562,8 @@ private fun ValueSocket(
         shape = shape,
         color = Color.Black.copy(alpha = 0.18f)
     ) {
-        if (!connected) {
-            Box(contentAlignment = Alignment.Center) {
-                Text(fallback, color = Color.White.copy(alpha = 0.94f), fontWeight = FontWeight.SemiBold, fontSize = 12.sp, maxLines = 1)
-            }
+        Box(contentAlignment = Alignment.Center) {
+            Text(fallback, color = Color.White.copy(alpha = 0.94f), fontWeight = FontWeight.SemiBold, fontSize = 12.sp, maxLines = 1)
         }
     }
 }
