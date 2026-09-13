@@ -581,23 +581,10 @@ private fun BlockPaletteSheet(onDismiss: () -> Unit, onAdd: (BlockType) -> Unit)
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            Surface(
-                                shape = MaterialTheme.shapes.medium,
-                                color = blockColor(type),
-                                modifier = Modifier.width(54.dp).height(38.dp)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Text(
-                                        when (type.role) {
-                                            BlockRole.COMMAND -> "↕"
-                                            BlockRole.CONTAINER -> "C"
-                                            BlockRole.VALUE -> if (type.outputType == ValueType.BOOLEAN) "◇" else "()"
-                                        },
-                                        color = androidx.compose.ui.graphics.Color.White,
-                                        fontWeight = FontWeight.Black
-                                    )
-                                }
-                            }
+                            BlockTypePreview(
+                                type = type,
+                                modifier = Modifier.width(166.dp).height(82.dp)
+                            )
                             Column(modifier = Modifier.weight(1f)) {
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                                     Text(type.title, fontWeight = FontWeight.SemiBold)
