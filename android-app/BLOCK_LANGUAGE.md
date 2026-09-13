@@ -1,8 +1,8 @@
 # Elekto Block Language
 
-Status: Alpha 7 foundation
+Status: Alpha 8 grammar + renderer foundation
 
-This document defines the visual grammar of the native Elekto Blocks editor. Blockly was analysed as a reference for proven concepts, but the Android renderer and geometry are implemented independently in Kotlin/Jetpack Compose.
+This document defines the visual grammar of the native Elekto Blocks editor. Blockly was analysed as a reference for proven concepts, but the Android renderer, geometry and connection model are implemented independently in Kotlin/Jetpack Compose.
 
 ## Core rule
 
@@ -28,87 +28,117 @@ Examples: `Warten`, `Digitaler Ausgang`, `PWM-Ausgang`, `Wiederholen`, `Wenn`.
 
 ### Statement inputs
 
-Control blocks expose a C-shaped statement body. The first nested command connects to a matching statement tab directly below the header. The container height is calculated from its children; the body is not a decorative frame with arbitrary empty space.
+Control blocks expose a C-shaped statement body. The first nested command connects directly below the header. The container height is calculated from its children; the body is not a decorative frame with arbitrary empty space.
 
-Examples: body of `Wiederholen` and `Wenn`.
+Alpha 8 also allows insertion between existing children: the preview shows the insertion position before the finger is released.
 
 ### Value connections
 
 Value blocks do not join statement stacks. They plug into typed value sockets.
 
-Initial Alpha 7 type:
+Implemented in Alpha 8:
 
 - `NUMBER`: rounded/capsule shape
-
-Planned grammar:
-
 - `BOOLEAN`: hexagonal shape
+
+Planned:
+
 - `TEXT`: a distinct value shape while remaining visually compatible with text inputs
 
-The shape and the connection checker must describe the same type rule.
+The visible shape and the connection checker describe the same type rule.
 
-## Alpha 7 typed inputs
+## Alpha 8 typed inputs and outputs
 
-| Owner block | Input key | Type | Fallback |
+| Block | Input / Output | Type | Fallback |
 |---|---|---|---|
-| Warten | `duration` | NUMBER | stored milliseconds |
-| Wiederholen | `count` | NUMBER | stored repetition count |
+| Warten | `duration` | NUMBER input | stored milliseconds |
+| Wiederholen | `count` | NUMBER input | stored repetition count |
+| Wenn | `condition` | BOOLEAN input | stored digital-pin HIGH/LOW test |
+| Analogwert | output | NUMBER | A0–A5 |
+| Zahl | output | NUMBER | editable literal |
+| Digitaler Zustand | output | BOOLEAN | digital pin HIGH/LOW |
+| Zahlen vergleichen | `left`, `right` | NUMBER inputs | two stored numbers |
+| Zahlen vergleichen | output | BOOLEAN | result of comparison |
 
-`Analogwert A0–A5` is the first real NUMBER output block. It can therefore be dragged into these NUMBER sockets. When connected, generated Arduino code uses the value expression directly, e.g. `delay(analogRead(A0));` or a loop bound based on `analogRead(A0)`.
+Examples that are now structurally possible:
 
-The fallback remains visible as a shadow-style value when no value block is connected. Later a dedicated editable number block will replace more of these fallback-only values.
+- `Warten [1000]`
+- `Warten [Analog A0]`
+- `Wiederhole [5] mal`
+- `Wenn [D2 = HIGH]`
+- `Wenn [[Analog A0] > [500]]`
 
-## Geometry constants
+The Arduino generator reads the connection tree, not screen coordinates.
 
-The renderer uses a shared geometry vocabulary instead of per-block decorative shapes:
+## Shadow-style fallbacks
+
+Typed sockets show a default value while they are empty. This keeps beginner blocks immediately usable without forcing a child to fetch a separate value block for every simple constant.
+
+When a compatible value block is inserted, it replaces the visual fallback. Removing the value restores the fallback; the value block itself is detached rather than silently deleted.
+
+## Geometry and layout
+
+Alpha 8 moves away from fixed per-block rectangles toward a shared layout vocabulary:
 
 - statement height: 56 dp
+- value height: 42 dp
 - connector overlap: 8 dp
-- command width: 248 dp
-- number value size: 112 × 42 dp
-- control width: 304 dp
 - control header: 54 dp
 - control footer: 18 dp
 - statement indentation: 34 dp
+- minimum command width: 208 dp
+- minimum control width: 286 dp
+- NUMBER socket minimum: 92 dp
+- BOOLEAN socket minimum: 152 dp
 
-These values may be tuned after device testing, but connector alignment must remain mathematically consistent.
+Block width is calculated from content and connected value width. Socket positions are derived from the same layout rules instead of hard-coded screen coordinates. A wide Boolean comparison inserted into `Wenn`, for example, can make the owner header wider without changing the connection meaning.
 
 ## Snapping rules
 
 1. Statement blocks may snap only to statement connections or statement inputs.
 2. Value blocks may snap only to value inputs whose declared type matches the block output type.
-3. One value socket may contain exactly one value block.
-4. Replacing a value must detach the old block rather than delete it.
+3. One value socket contains exactly one value block.
+4. Replacing a value detaches the old value rather than deleting it.
 5. Moving a connected owner moves its nested statements and connected values with it.
 6. Invalid connections never become part of the saved program model.
+7. Statement insertion inside a control body preserves the surrounding child order.
+8. A visible ghost preview appears at the exact snap location before drop.
 
 ## Mobile interaction rules
 
-- Workspace controls and the `Blöcke` action must occupy different screen zones.
-- Zoom must not change drag distance; pointer movement is converted back into workspace coordinates.
-- Editing values happens in touch-friendly sheets/popups, not tiny desktop-style controls.
-- The workspace must remain usable in portrait orientation.
-- Later: pinch zoom, connection highlight, insertion preview and haptic feedback on successful snap.
+- Workspace controls and the `Blöcke` action occupy different screen zones.
+- Zoom does not change drag distance; pointer movement is converted back into workspace coordinates.
+- Editing values uses touch-friendly sheets/popups, not tiny desktop-style controls.
+- The workspace remains usable in portrait orientation.
+- Connection previews give feedback before drop.
+- Planned: pinch zoom and haptic feedback on successful snap.
 
-## Data model direction
+## Data model
 
 A `ProgramBlock` can participate in one of three structural relations:
 
 - `previousId`: statement sequence
-- `parentId`: statement inside a control block
+- `parentId` + `childOrder`: statement inside a control block
 - `valueOwnerId` + `valueInputKey`: typed value inside an input socket
 
-These relations are persisted locally and are independent from the visual renderer. Code generation reads the structure, not screen coordinates.
+Additional semantic data is stored independently from drawing geometry, including numeric fallback values, HIGH/LOW flags and comparison operator.
 
-## Planned next grammar extensions
+## Current design direction
 
-1. Dedicated NUMBER literal block.
-2. BOOLEAN outputs and hexagonal sockets.
-3. Digital input as a BOOLEAN value block.
-4. Comparison block: NUMBER × operator × NUMBER → BOOLEAN.
-5. `Wenn` refactor from fixed D-pin state settings to a BOOLEAN value input.
-6. Variables with explicit data types.
-7. Text values and serial output.
-8. Multiple statement inputs (`wenn / sonst`).
+The editor must grow from the grammar, not from one-off block artwork. New blocks should first declare:
 
-The editor should grow from this grammar rather than adding block-specific one-off shapes.
+1. role: command, value or container
+2. input/output data types
+3. semantic parameters
+4. generated Arduino meaning
+5. then visual content using the shared renderer
+
+## Planned grammar extensions
+
+1. Text values and serial output.
+2. Variables with explicit data types.
+3. Multiple statement inputs (`wenn / sonst`).
+4. Boolean operations (`UND`, `ODER`, `NICHT`).
+5. Arithmetic NUMBER blocks.
+6. Dedicated Arduino `Beim Start` / `Immer wieder` structural blocks if user testing confirms this is clearer for children.
+7. Haptic snap confirmation and stronger connection highlighting.

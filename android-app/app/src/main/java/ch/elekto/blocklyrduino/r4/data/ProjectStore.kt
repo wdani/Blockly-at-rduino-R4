@@ -29,6 +29,7 @@ class ProjectStore(context: Context) {
                             primary = item.optInt("primary", type.defaultPrimary),
                             secondary = item.optInt("secondary", type.defaultSecondary),
                             flag = item.optBoolean("flag", type.defaultFlag),
+                            option = item.optString("option", type.defaultOption),
                             parentId = item.optString("parentId", "").takeIf { it.isNotBlank() },
                             childOrder = item.optInt("childOrder", 0),
                             previousId = item.optString("previousId", "").takeIf { it.isNotBlank() },
@@ -53,6 +54,7 @@ class ProjectStore(context: Context) {
                     .put("primary", block.primary)
                     .put("secondary", block.secondary)
                     .put("flag", block.flag)
+                    .put("option", block.option)
                     .put("parentId", block.parentId ?: "")
                     .put("childOrder", block.childOrder)
                     .put("previousId", block.previousId ?: "")
@@ -64,7 +66,7 @@ class ProjectStore(context: Context) {
     }
 
     companion object {
-        // Same key keeps Alpha 5/6 projects. New fields are optional and migrate in place.
+        // Keep the same key so Alpha 5+ projects migrate in place.
         private const val KEY_BLOCKS = "program_blocks_v1"
     }
 }

@@ -3,7 +3,6 @@ package ch.elekto.blocklyrduino.r4.engine
 import ch.elekto.blocklyrduino.r4.model.BlockRole
 import ch.elekto.blocklyrduino.r4.model.BlockType
 import ch.elekto.blocklyrduino.r4.model.ProgramBlock
-import ch.elekto.blocklyrduino.r4.model.ValueType
 import ch.elekto.blocklyrduino.r4.model.connectedValue
 import ch.elekto.blocklyrduino.r4.model.directChildren
 import ch.elekto.blocklyrduino.r4.model.valueInputSpec
@@ -18,6 +17,7 @@ data class ValidationIssue(
 
 object ProgramValidator {
     private val pwmPins = setOf(3, 5, 6, 9, 10, 11)
+    private val compareOptions = setOf("EQ", "NE", "LT", "LTE", "GT", "GTE")
 
     fun validate(blocks: List<ProgramBlock>): List<ValidationIssue> {
         val issues = mutableListOf<ValidationIssue>()
@@ -96,6 +96,32 @@ object ProgramValidator {
                         issues += ValidationIssue(IssueLevel.ERROR, "Der UNO R4 hat in dieser Ansicht die Analogeingänge A0 bis A5.", block.id)
                     }
                 }
+                BlockType.NUMBER_LITERAL -> {
+                    if (block.primary !in -1_000_000..1_000_000) {
+                        issues += ValidationIssue(IssueLevel.ERROR, "Die Zahl muss zwischen -1000000 und 1000000 liegen.", block.id)
+                    }
+                }
+                BlockType.DIGITAL_READ_BOOL -> {
+                    if (block.primary !in 0..13) {
+                        issues += ValidationIssue(IssueLevel.ERROR, "Digital-Pin D${block.primary} existiert am UNO R4 Header nicht.", block.id)
+                    } else {
+                        inputPins += block.primary
+                        if (block.primary in 0..1) {
+                            issues += ValidationIssue(IssueLevel.WARNING, "D${block.primary} wird auch für die serielle Schnittstelle verwendet.", block.id)
+                        }
+                    }
+                }
+                BlockType.COMPARE_NUMBER -> {
+                    if (block.option !in compareOptions) {
+                        issues += ValidationIssue(IssueLevel.ERROR, "Der Vergleichsoperator ist ungültig.", block.id)
+                    }
+                    if (connectedValue(blocks, block.id, "left") == null && block.primary !in -1_000_000..1_000_000) {
+                        issues += ValidationIssue(IssueLevel.ERROR, "Der linke Vergleichswert ist außerhalb des erlaubten Bereichs.", block.id)
+                    }
+                    if (connectedValue(blocks, block.id, "right") == null && block.secondary !in -1_000_000..1_000_000) {
+                        issues += ValidationIssue(IssueLevel.ERROR, "Der rechte Vergleichswert ist außerhalb des erlaubten Bereichs.", block.id)
+                    }
+                }
                 BlockType.DELAY -> {
                     if (connectedValue(blocks, block.id, "duration") == null && block.primary !in 0..600_000) {
                         issues += ValidationIssue(IssueLevel.ERROR, "Die Wartezeit muss zwischen 0 und 600000 ms liegen.", block.id)
@@ -110,15 +136,21 @@ object ProgramValidator {
                     }
                 }
                 BlockType.IF_DIGITAL -> {
-                    if (block.primary !in 0..13) {
-                        issues += ValidationIssue(IssueLevel.ERROR, "Digital-Pin D${block.primary} existiert am UNO R4 Header nicht.", block.id)
-                    } else {
-                        inputPins += block.primary
+                    if (connectedValue(blocks, block.id, "condition") == null) {
+                        if (block.primary !in 0..13) {
+                            issues += ValidationIssue(IssueLevel.ERROR, "Digital-Pin D${block.primary} existiert am UNO R4 Header nicht.", block.id)
+                        } else {
+                            inputPins += block.primary
+                        }
                     }
                     if (directChildren(blocks, block.id).isEmpty()) {
                         issues += ValidationIssue(IssueLevel.INFO, "Der Wenn-Block ist noch leer. Ziehe Befehle in seine Öffnung.", block.id)
                     }
                 }
+            }
+
+            if (block.type.role == BlockRole.VALUE && block.valueOwnerId == null) {
+                issues += ValidationIssue(IssueLevel.INFO, "Der Wertblock „${block.type.title}“ ist noch mit keinem Eingang verbunden.", block.id)
             }
         }
 
@@ -146,6 +178,15 @@ object ProgramValidator {
 }
 
 object ArduinoCodeGenerator {
+    private val operatorMap = mapOf(
+        "EQ" to "==",
+        "NE" to "!=",
+        "LT" to "<",
+        "LTE" to "<=",
+        "GT" to ">",
+        "GTE" to ">="
+    )
+
     fun generate(blocks: List<ProgramBlock>): String {
         val byId = blocks.associateBy { it.id }
         val outputPins = blocks
@@ -153,23 +194,48 @@ object ArduinoCodeGenerator {
             .map { it.primary }
             .filter { it in 0..13 }
             .distinct()
-        val inputPins = blocks
-            .filter { it.type == BlockType.IF_DIGITAL }
-            .map { it.primary }
-            .filter { it in 0..13 }
-            .distinct()
 
-        fun numberExpression(owner: ProgramBlock, inputKey: String, fallback: Int): String {
-            val value = connectedValue(blocks, owner.id, inputKey) ?: return fallback.toString()
+        val inputPins = buildSet {
+            blocks.filter { it.type == BlockType.DIGITAL_READ_BOOL && it.primary in 0..13 }
+                .forEach { add(it.primary) }
+            blocks.filter {
+                it.type == BlockType.IF_DIGITAL &&
+                    connectedValue(blocks, it.id, "condition") == null &&
+                    it.primary in 0..13
+            }.forEach { add(it.primary) }
+        }
+
+        fun valueExpression(value: ProgramBlock, visited: Set<String> = emptySet()): String {
+            if (value.id in visited) return "0"
+            val nextVisited = visited + value.id
             return when (value.type) {
+                BlockType.NUMBER_LITERAL -> value.primary.toString()
                 BlockType.ANALOG_READ -> "analogRead(A${value.primary.coerceIn(0, 5)})"
-                else -> fallback.toString()
+                BlockType.DIGITAL_READ_BOOL ->
+                    "(digitalRead(${value.primary.coerceIn(0, 13)}) == ${if (value.flag) "HIGH" else "LOW"})"
+                BlockType.COMPARE_NUMBER -> {
+                    val left = connectedValue(blocks, value.id, "left")
+                        ?.let { valueExpression(it, nextVisited) }
+                        ?: value.primary.toString()
+                    val right = connectedValue(blocks, value.id, "right")
+                        ?.let { valueExpression(it, nextVisited) }
+                        ?: value.secondary.toString()
+                    val op = operatorMap[value.option] ?: ">"
+                    "(($left) $op ($right))"
+                }
+                else -> "0"
             }
         }
 
+        fun numberExpression(owner: ProgramBlock, inputKey: String, fallback: Int): String =
+            connectedValue(blocks, owner.id, inputKey)?.let(::valueExpression) ?: fallback.toString()
+
+        fun booleanExpression(owner: ProgramBlock, inputKey: String, fallback: String): String =
+            connectedValue(blocks, owner.id, inputKey)?.let(::valueExpression) ?: fallback
+
         fun roots(): List<ProgramBlock> = blocks
             .filter {
-                it.parentId == null && it.valueOwnerId == null &&
+                it.type.role != BlockRole.VALUE && it.parentId == null && it.valueOwnerId == null &&
                     (it.previousId == null || byId[it.previousId] == null)
             }
             .sortedWith(compareBy<ProgramBlock> { it.yDp }.thenBy { it.xDp })
@@ -193,12 +259,6 @@ object ArduinoCodeGenerator {
                         appendLine("${indent}digitalWrite(${block.primary}, ${if (block.flag) "HIGH" else "LOW"});")
                     BlockType.PWM_WRITE ->
                         appendLine("${indent}analogWrite(${block.primary}, ${block.secondary.coerceIn(0, 255)});")
-                    BlockType.ANALOG_READ -> {
-                        if (block.valueOwnerId == null) {
-                            val suffix = block.id.replace("-", "").take(6)
-                            appendLine("${indent}int analog_$suffix = analogRead(A${block.primary.coerceIn(0, 5)});")
-                        }
-                    }
                     BlockType.DELAY ->
                         appendLine("${indent}delay(${numberExpression(block, "duration", block.primary.coerceAtLeast(0))});")
                     BlockType.REPEAT -> {
@@ -209,10 +269,16 @@ object ArduinoCodeGenerator {
                         appendLine("${indent}}")
                     }
                     BlockType.IF_DIGITAL -> {
-                        appendLine("${indent}if (digitalRead(${block.primary}) == ${if (block.flag) "HIGH" else "LOW"}) {")
+                        val fallback = "(digitalRead(${block.primary.coerceIn(0, 13)}) == ${if (block.flag) "HIGH" else "LOW"})"
+                        val condition = booleanExpression(block, "condition", fallback)
+                        appendLine("${indent}if ($condition) {")
                         directChildren(blocks, block.id).forEach { emitBlock(it, "$indent  ") }
                         appendLine("${indent}}")
                     }
+                    BlockType.ANALOG_READ,
+                    BlockType.NUMBER_LITERAL,
+                    BlockType.DIGITAL_READ_BOOL,
+                    BlockType.COMPARE_NUMBER -> Unit
                 }
             }
 
@@ -228,9 +294,9 @@ object ArduinoCodeGenerator {
             }
 
             roots().forEach(::emitChain)
-            blocks.filter { it.id !in emitted && it.valueOwnerId == null }
-                .sortedBy { it.yDp }
-                .forEach { emitBlock(it, "  ") }
+            blocks.filter {
+                it.id !in emitted && it.valueOwnerId == null && it.type.role != BlockRole.VALUE
+            }.sortedBy { it.yDp }.forEach { emitBlock(it, "  ") }
 
             appendLine("}")
         }
