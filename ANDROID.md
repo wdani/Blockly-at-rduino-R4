@@ -55,22 +55,28 @@ Corrective mobile layout:
 - Preserve the early pointer/touch compatibility layer.
 - Android versionCode incremented to 3.
 
-## Current test checklist
+Real-device result:
 
-1. Install the newest debug APK.
-2. Open the app in portrait orientation.
-3. Confirm the Blockly categories/toolbox are visible.
-4. Open a category and confirm its blocks appear.
-5. Drag one block from the flyout into the workspace with one finger.
-6. Move the placed block around the workspace with one finger.
-7. Rotate portrait -> landscape -> portrait and confirm the workspace remains usable.
+- App installs and opens successfully.
+- Blockly categories/toolbox are visible again.
+- Categories can be opened and blocks are displayed.
+- Blocks can be dragged from the flyout onto the workspace with one finger.
+- Placed blocks can be moved around the workspace with touch.
+- This confirms the early pointer compatibility layer and the corrected Blockly geometry work on a real Android phone.
+- The inherited desktop-style mobile layout is still visually rough and is not considered the final app UI.
 
-Only after toolbox visibility and touch dragging work reliably will the Android UI be redesigned into a proper mobile-native app structure.
+## Current milestone
+
+The core mobile interaction proof-of-concept is now successful: Blockly loads offline in the Android app and touch dragging works on real hardware.
+
+The next work should no longer focus on patching the old desktop chrome. Instead, keep the working editor behaviour stable and build a deliberate mobile app shell around it.
 
 ## Next phases
 
 - Replace the inherited desktop chrome with a deliberate mobile app shell rather than progressively hiding desktop elements.
+- Design a compact mobile project/editor flow with only the controls needed on a phone.
 - Decide whether the long-term editor remains modern Blockly embedded in a native Kotlin/Compose app or becomes a custom native block editor.
+- Preserve the now-working touch/drag behaviour while the UI is redesigned.
 - Native Android USB device detection.
 - UNO R4 WiFi 1200-baud reset / SAM-BA-BOSSAC upload path.
 - Serial monitor support where practical.
