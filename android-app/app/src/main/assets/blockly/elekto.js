@@ -174,7 +174,7 @@
   sizeWorkspaceHost();
 
   const workspace = Blockly.inject('workspace', {
-    toolbox,
+    toolbox: null,
     theme: elektoTheme,
     renderer: 'zelos',
     trashcan: true,
@@ -348,7 +348,113 @@
     localStorage.setItem('elekto-blockly-poc-workspace', JSON.stringify(state));
   }
 
+  function connectShadowNumber(block, inputName, value) {
+    const shadow = workspace.newBlock('math_number');
+    shadow.setShadow(true);
+    shadow.setFieldValue(String(value), 'NUM');
+    shadow.initSvg();
+    shadow.render();
+    const input = block.getInput(inputName);
+    if (input?.connection && shadow.outputConnection) {
+      input.connection.connect(shadow.outputConnection);
+    }
+  }
+
+  function connectShadowBoolean(block, inputName, value) {
+    const shadow = workspace.newBlock('logic_boolean');
+    shadow.setShadow(true);
+    shadow.setFieldValue(value ? 'TRUE' : 'FALSE', 'BOOL');
+    shadow.initSvg();
+    shadow.render();
+    const input = block.getInput(inputName);
+    if (input?.connection && shadow.outputConnection) {
+      input.connection.connect(shadow.outputConnection);
+    }
+  }
+
+  function placeNewBlock(block) {
+    block.initSvg();
+    block.render();
+
+    const metrics = workspace.getMetrics();
+    const scale = workspace.scale || 1;
+    const x = ((metrics.viewLeft || 0) + (metrics.viewWidth || 320) * 0.42) / scale;
+    const y = ((metrics.viewTop || 0) + (metrics.viewHeight || 520) * 0.28) / scale;
+    block.moveBy(Math.max(24, x), Math.max(24, y));
+    block.select?.();
+    Blockly.svgResize(workspace);
+    return block;
+  }
+
+  function createCatalogBlock(id) {
+    Blockly.Events.setGroup(true);
+    try {
+      let block;
+      switch (id) {
+        case 'delay':
+          block = workspace.newBlock('elekto_delay');
+          block.initSvg(); block.render();
+          connectShadowNumber(block, 'TIME', 1000);
+          break;
+        case 'digital_write':
+          block = workspace.newBlock('elekto_digital_write');
+          break;
+        case 'analog_read':
+          block = workspace.newBlock('elekto_analog_read');
+          break;
+        case 'number':
+          block = workspace.newBlock('math_number');
+          block.setFieldValue('1000', 'NUM');
+          break;
+        case 'compare':
+          block = workspace.newBlock('logic_compare');
+          block.initSvg(); block.render();
+          connectShadowNumber(block, 'A', 0);
+          connectShadowNumber(block, 'B', 500);
+          break;
+        case 'if':
+          block = workspace.newBlock('elekto_if');
+          block.initSvg(); block.render();
+          connectShadowBoolean(block, 'COND', true);
+          break;
+        case 'repeat':
+          block = workspace.newBlock('elekto_repeat');
+          block.initSvg(); block.render();
+          connectShadowNumber(block, 'COUNT', 10);
+          break;
+        default:
+          throw new Error('Unbekannter Elekto-Block: ' + id);
+      }
+      return placeNewBlock(block);
+    } finally {
+      Blockly.Events.setGroup(false);
+    }
+  }
+
+  function setDraggedVisual(blockId, active) {
+    const block = workspace.getBlockById(blockId);
+    const root = block?.getSvgRoot?.();
+    if (!root) return;
+    root.style.opacity = active ? '0.58' : '';
+    root.style.filter = active ? 'drop-shadow(0 3px 7px rgba(35,120,230,.28))' : '';
+  }
+
+  workspace.addChangeListener(event => {
+    if (event.type === Blockly.Events.BLOCK_DRAG && event.blockId) {
+      setDraggedVisual(event.blockId, !!event.isStart);
+    }
+  });
+
   window.Elekto = {
+    addBlock(id) {
+      createCatalogBlock(id);
+    },
+    undo() {
+      workspace.undo(false);
+    },
+    redo() {
+      workspace.undo(true);
+    },
     requestCode() {
       const code = generateArduino();
       if (window.ElektoAndroid?.showCode) {
