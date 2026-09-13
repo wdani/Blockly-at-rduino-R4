@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
@@ -264,20 +265,16 @@ private fun BlockCatalogSheet(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
-            LazyColumn(
-                modifier = Modifier.fillMaxWidth().height(54.dp),
-                horizontalAlignment = Alignment.Start
+            LazyRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                item {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        BlockCategory.entries.forEach { item ->
-                            FilterChip(
-                                selected = category == item,
-                                onClick = { category = item },
-                                label = { Text(item.title) }
-                            )
-                        }
-                    }
+                items(BlockCategory.entries) { item ->
+                    FilterChip(
+                        selected = category == item,
+                        onClick = { category = item },
+                        label = { Text(item.title) }
+                    )
                 }
             }
 
