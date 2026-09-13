@@ -90,6 +90,25 @@
             return wrappers;
         };
 
+        // The legacy Blockly touch layer starts a timer on every touchstart.
+        // When it fires, it turns that touch into a synthetic right-click and
+        // opens Blockly's context menu. On Android this interferes with block
+        // fields/dropdowns, so disable the legacy long-press context-menu
+        // gesture while keeping normal pointer dragging intact.
+        var isAndroidApp = !!window.__blocklyR4AndroidMobileBootstrapInstalled ||
+            /Android/i.test((window.navigator && window.navigator.userAgent) || '');
+        if (isAndroidApp && typeof Blockly.longStart_ === 'function') {
+            if (typeof Blockly.longStop_ === 'function') {
+                Blockly.longStop_();
+            }
+            Blockly.longStart_ = function () {
+                if (typeof Blockly.longStop_ === 'function') {
+                    Blockly.longStop_();
+                }
+            };
+            window.__blocklyR4AndroidLongPressDisabled = true;
+        }
+
         var style = document.createElement('style');
         style.id = 'r4-pointer-compat-style';
         style.textContent = [
