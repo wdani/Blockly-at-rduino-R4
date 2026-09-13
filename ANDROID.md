@@ -65,14 +65,40 @@ Real-device result:
 - This confirms the early pointer compatibility layer and the corrected Blockly geometry work on a real Android phone.
 - The inherited desktop-style mobile layout is still visually rough and is not considered the final app UI.
 
+### 0.1.0-alpha.4
+
+Dropdown / long-press correction:
+
+- Real-device test exposed another legacy touch issue: while using an editable block field/dropdown, the dropdown can disappear after a short hold and Blockly opens the workspace context menu with actions such as Undo/Redo/Clean up.
+- Root cause: the legacy Blockly touch layer registers `touchstart` long-press handlers on both the workspace and every block. After `LONGPRESS` it converts the touch into a synthetic right-click (`button = 2`) and calls the normal context-menu path.
+- Android now disables this old touch-long-press context-menu gesture while preserving normal pointer dragging and field interaction.
+- Browser/WebView context menus are suppressed inside the Blockly editor area.
+- Blockly field/dropdown menus are kept above the workspace and receive larger touch targets plus bounded mobile height/scrolling.
+- Android versionCode incremented to 4.
+
 ## Current milestone
 
-The core mobile interaction proof-of-concept is now successful: Blockly loads offline in the Android app and touch dragging works on real hardware.
+The core mobile interaction proof-of-concept is successful: Blockly loads offline in the Android app and touch dragging works on real hardware. Alpha 4 focuses on making editable block fields/dropdowns stable on touch devices.
 
-The next work should no longer focus on patching the old desktop chrome. Instead, keep the working editor behaviour stable and build a deliberate mobile app shell around it.
+## Mobile UI direction
+
+The final Android app should not copy the desktop Blockly@rduino layout one-to-one. The working editor behaviour should stay stable while the app shell is redesigned specifically for phones and tablets.
+
+Principles for the mobile layout:
+
+- Keep the workspace as the main surface; avoid permanently occupying large areas with desktop-style panels.
+- Use a compact top app bar for project title, board/connection status and a small number of primary actions.
+- Open block categories in a temporary drawer, bottom sheet or popup rather than reserving nearly half the screen permanently.
+- Use bottom sheets / dialogs for block-specific settings, board selection, code view, serial monitor, compile/upload status and advanced options.
+- Make popups large enough for touch, scrollable when needed, and easy to dismiss without losing the current workspace.
+- Group larger functions into clear sections/chapters instead of exposing everything at once.
+- Keep beginner and advanced functions separated so the interface can grow without becoming crowded.
+- Preserve portrait usability; landscape/tablet layouts may expose more controls but must not be required for normal use.
+- Long-press should not secretly trigger destructive or global workspace actions. Such actions belong in an explicit overflow/menu surface.
 
 ## Next phases
 
+- Verify Alpha 4: dropdowns remain open and selectable without the workspace context menu appearing.
 - Replace the inherited desktop chrome with a deliberate mobile app shell rather than progressively hiding desktop elements.
 - Design a compact mobile project/editor flow with only the controls needed on a phone.
 - Decide whether the long-term editor remains modern Blockly embedded in a native Kotlin/Compose app or becomes a custom native block editor.
