@@ -40,12 +40,12 @@ jobs:
             -name elektoAlpha \
             -passout pass:android
 
-      - name: Build native Alpha 5 APK
+      - name: Build native Alpha 6 APK
         run: gradle -p android-app :app:assembleDebug
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Elekto-Blocks-Android-alpha5-native
+          name: Elekto-Blocks-Android-alpha6-connections
           path: android-app/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error

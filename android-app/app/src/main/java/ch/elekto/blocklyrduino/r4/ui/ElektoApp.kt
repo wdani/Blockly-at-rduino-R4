@@ -70,9 +70,16 @@ import ch.elekto.blocklyrduino.r4.engine.IssueLevel
 import ch.elekto.blocklyrduino.r4.engine.ProgramValidator
 import ch.elekto.blocklyrduino.r4.engine.ValidationIssue
 import ch.elekto.blocklyrduino.r4.model.BlockCategory
+import ch.elekto.blocklyrduino.r4.model.BlockRole
 import ch.elekto.blocklyrduino.r4.model.BlockType
+import ch.elekto.blocklyrduino.r4.model.ConnectorOverlapDp
 import ch.elekto.blocklyrduino.r4.model.ProgramBlock
+import ch.elekto.blocklyrduino.r4.model.blockHeightDp
+import ch.elekto.blocklyrduino.r4.model.chainFrom
 import ch.elekto.blocklyrduino.r4.model.defaultBlinkProject
+import ch.elekto.blocklyrduino.r4.model.linkedDescendantIds
+import ch.elekto.blocklyrduino.r4.model.normalizeProjectLayout
+import kotlin.math.abs
 import kotlin.math.round
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -98,15 +105,23 @@ fun ElektoApp() {
 
     fun persist() = store.saveBlocks(blocks)
 
+    fun applyNormalized(save: Boolean = false) {
+        val normalized = normalizeProjectLayout(blocks.toList())
+        blocks.clear()
+        blocks.addAll(normalized)
+        if (save) persist()
+    }
+
     fun replaceProject(newBlocks: List<ProgramBlock>) {
         blocks.clear()
-        blocks.addAll(newBlocks)
+        blocks.addAll(normalizeProjectLayout(newBlocks))
         persist()
     }
 
     fun addBlock(type: BlockType) {
-        val nextY = ((blocks.maxOfOrNull { it.yDp } ?: -40f) + 92f).coerceAtMost(1900f)
-        blocks += ProgramBlock(type = type, xDp = 40f, yDp = nextY)
+        val loose = blocks.filter { it.parentId == null }
+        val nextY = ((loose.maxOfOrNull { it.yDp + blockHeightDp(it, blocks) } ?: -20f) + 26f).coerceAtMost(1900f)
+        blocks += ProgramBlock(type = type, xDp = 32f, yDp = nextY)
         persist()
     }
 
@@ -114,8 +129,126 @@ fun ElektoApp() {
         val index = blocks.indexOfFirst { it.id == updated.id }
         if (index >= 0) {
             blocks[index] = updated
-            persist()
+            applyNormalized(save = true)
         }
+    }
+
+    fun detachForDrag(id: String) {
+        val index = blocks.indexOfFirst { it.id == id }
+        if (index < 0) return
+        val current = blocks[index]
+        if (current.parentId != null || current.previousId != null) {
+            blocks[index] = current.copy(parentId = null, previousId = null, childOrder = 0)
+            applyNormalized(save = false)
+        }
+    }
+
+    fun moveWithConnections(id: String, dx: Float, dy: Float) {
+        val linked = linkedDescendantIds(blocks.toList(), id) + id
+        blocks.indices.forEach { index ->
+            val block = blocks[index]
+            if (block.id in linked) {
+                blocks[index] = block.copy(
+                    xDp = (block.xDp + dx).coerceIn(8f, 1100f),
+                    yDp = (block.yDp + dy).coerceIn(8f, 2070f)
+                )
+            }
+        }
+    }
+
+    fun finishMove(id: String) {
+        var index = blocks.indexOfFirst { it.id == id }
+        if (index < 0) return
+
+        var moving = blocks[index]
+        moving = moving.copy(
+            xDp = round(moving.xDp / 8f) * 8f,
+            yDp = round(moving.yDp / 8f) * 8f,
+            parentId = null,
+            previousId = null
+        )
+        blocks[index] = moving
+
+        val excluded = linkedDescendantIds(blocks.toList(), id) + id
+        val movingCenterX = moving.xDp + if (moving.type.role == BlockRole.CONTAINER) 143f else 110f
+        val movingCenterY = moving.yDp + blockHeightDp(moving, blocks) / 2f
+
+        // First preference: drop command/control blocks into the open body of a control block.
+        val containerTarget = if (moving.type.role != BlockRole.VALUE) {
+            blocks.filter {
+                it.id !in excluded && it.type.role == BlockRole.CONTAINER
+            }.filter { target ->
+                val targetHeight = blockHeightDp(target, blocks)
+                val zoneBottom = target.yDp + maxOf(targetHeight - 12f, 150f)
+                movingCenterX in (target.xDp + 20f)..(target.xDp + 302f) &&
+                    movingCenterY in (target.yDp + 48f)..zoneBottom
+            }.minByOrNull { abs(moving.yDp - (it.yDp + 58f)) }
+        } else null
+
+        if (containerTarget != null) {
+            val chain = chainFrom(blocks.toList(), moving.id)
+            val existing = blocks.count { it.parentId == containerTarget.id }
+            chain.forEachIndexed { orderOffset, item ->
+                val itemIndex = blocks.indexOfFirst { it.id == item.id }
+                if (itemIndex >= 0) {
+                    blocks[itemIndex] = blocks[itemIndex].copy(
+                        parentId = containerTarget.id,
+                        previousId = null,
+                        childOrder = existing + orderOffset
+                    )
+                }
+            }
+            applyNormalized(save = true)
+            return
+        }
+
+        // Otherwise snap compatible statement/control blocks underneath another top-level block.
+        if (moving.type.role != BlockRole.VALUE) {
+            val target = blocks.filter {
+                it.id !in excluded && it.parentId == null && it.type.role != BlockRole.VALUE
+            }.map { candidate ->
+                val snapY = candidate.yDp + blockHeightDp(candidate, blocks) - ConnectorOverlapDp
+                Triple(candidate, abs(moving.xDp - candidate.xDp), abs(moving.yDp - snapY))
+            }.filter { (_, dx, dy) -> dx <= 74f && dy <= 34f }
+                .minByOrNull { (_, dx, dy) -> dx + dy }
+                ?.first
+
+            if (target != null) {
+                val chain = chainFrom(blocks.toList(), moving.id)
+                val tailId = chain.lastOrNull()?.id ?: moving.id
+                val oldFollowerIndex = blocks.indexOfFirst {
+                    it.parentId == null && it.previousId == target.id && it.id !in excluded
+                }
+                if (oldFollowerIndex >= 0) {
+                    blocks[oldFollowerIndex] = blocks[oldFollowerIndex].copy(previousId = tailId)
+                }
+                index = blocks.indexOfFirst { it.id == id }
+                if (index >= 0) {
+                    blocks[index] = blocks[index].copy(
+                        previousId = target.id,
+                        parentId = null,
+                        xDp = target.xDp,
+                        yDp = target.yDp + blockHeightDp(target, blocks) - ConnectorOverlapDp
+                    )
+                }
+            }
+        }
+
+        applyNormalized(save = true)
+    }
+
+    fun deleteBlock(id: String) {
+        val block = blocks.firstOrNull { it.id == id } ?: return
+        val previous = block.previousId
+        blocks.indices.forEach { index ->
+            val item = blocks[index]
+            when {
+                item.parentId == id -> blocks[index] = item.copy(parentId = null, childOrder = 0)
+                item.previousId == id -> blocks[index] = item.copy(previousId = previous)
+            }
+        }
+        blocks.removeAll { it.id == id }
+        applyNormalized(save = true)
     }
 
     Scaffold(
@@ -127,7 +260,7 @@ fun ElektoApp() {
                     Column {
                         Text("Elekto Blocks", fontWeight = FontWeight.SemiBold)
                         Text(
-                            "UNO R4 WiFi • lokal",
+                            "UNO R4 WiFi • Alpha 6 • lokal",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -141,10 +274,7 @@ fun ElektoApp() {
                         IconButton(onClick = { showMenu = true }) {
                             Icon(Icons.Default.MoreVert, contentDescription = "Mehr")
                         }
-                        DropdownMenu(
-                            expanded = showMenu,
-                            onDismissRequest = { showMenu = false }
-                        ) {
+                        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                             DropdownMenuItem(
                                 text = { Text("Blink-Demo laden") },
                                 onClick = {
@@ -182,27 +312,9 @@ fun ElektoApp() {
             BlockWorkspace(
                 blocks = blocks,
                 errorBlockIds = errorBlockIds,
-                onMove = { id, dx, dy ->
-                    val index = blocks.indexOfFirst { it.id == id }
-                    if (index >= 0) {
-                        val current = blocks[index]
-                        blocks[index] = current.copy(
-                            xDp = (current.xDp + dx).coerceIn(8f, 1080f),
-                            yDp = (current.yDp + dy).coerceIn(8f, 2020f)
-                        )
-                    }
-                },
-                onMoveFinished = { id ->
-                    val index = blocks.indexOfFirst { it.id == id }
-                    if (index >= 0) {
-                        val current = blocks[index]
-                        blocks[index] = current.copy(
-                            xDp = round(current.xDp / 8f) * 8f,
-                            yDp = round(current.yDp / 8f) * 8f
-                        )
-                        persist()
-                    }
-                },
+                onMoveStart = ::detachForDrag,
+                onMove = ::moveWithConnections,
+                onMoveFinished = ::finishMove,
                 onEdit = { editingBlock = it },
                 modifier = Modifier.weight(1f)
             )
@@ -228,18 +340,14 @@ fun ElektoApp() {
                 editingBlock = null
             },
             onDelete = {
-                blocks.removeAll { it.id == block.id }
-                persist()
+                deleteBlock(block.id)
                 editingBlock = null
             }
         )
     }
 
     if (showCode) {
-        CodeSheet(
-            blocks = blocks,
-            onDismiss = { showCode = false }
-        )
+        CodeSheet(blocks = blocks, onDismiss = { showCode = false })
     }
 }
 
@@ -250,28 +358,15 @@ private fun StatusStrip(blockCount: Int, issues: List<ValidationIssue>) {
 
     Surface(tonalElevation = 2.dp, modifier = Modifier.fillMaxWidth()) {
         Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             AssistChip(onClick = {}, label = { Text("$blockCount Blöcke") })
             when {
-                errors > 0 -> Text(
-                    "$errors Fehler",
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Bold
-                )
-                warnings > 0 -> Text(
-                    "$warnings Hinweise",
-                    color = MaterialTheme.colorScheme.tertiary,
-                    style = MaterialTheme.typography.labelLarge
-                )
-                else -> Text(
-                    "Prüfung OK",
-                    color = MaterialTheme.colorScheme.primary,
-                    style = MaterialTheme.typography.labelLarge
-                )
+                errors > 0 -> Text("$errors Fehler", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                warnings > 0 -> Text("$warnings Hinweise", color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.labelLarge)
+                else -> Text("Prüfung OK", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
             }
         }
     }
@@ -287,32 +382,45 @@ private fun BlockPaletteSheet(onDismiss: () -> Unit, onAdd: (BlockType) -> Unit)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(0.78f)
+                .fillMaxHeight(0.84f)
                 .padding(horizontal = 18.dp)
         ) {
             Text("Blöcke auswählen", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(5.dp))
             Text(
-                "Kategorien erscheinen nur bei Bedarf und lassen der Arbeitsfläche den Platz.",
+                "Die Form zeigt, wie ein Block verwendet wird. So wird die Struktur schon beim Anschauen verständlich.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(10.dp))
 
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(BlockCategory.entries.toList()) { item ->
-                    FilterChip(
-                        selected = category == item,
-                        onClick = { category = item },
-                        label = { Text(item.title) }
-                    )
+                items(BlockRole.entries.toList()) { role ->
+                    Surface(shape = MaterialTheme.shapes.medium, tonalElevation = 1.dp) {
+                        Column(Modifier.padding(horizontal = 11.dp, vertical = 8.dp)) {
+                            Text(role.title, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelLarge)
+                            Text(
+                                when (role) {
+                                    BlockRole.COMMAND -> "steckt oben/unten"
+                                    BlockRole.VALUE -> "liefert einen Wert"
+                                    BlockRole.CONTAINER -> "nimmt Befehle auf"
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                 }
             }
 
             Spacer(Modifier.height(12.dp))
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(BlockCategory.entries.toList()) { item ->
+                    FilterChip(selected = category == item, onClick = { category = item }, label = { Text(item.title) })
+                }
+            }
+
+            Spacer(Modifier.height(10.dp))
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(9.dp), modifier = Modifier.fillMaxWidth()) {
                 items(BlockType.entries.filter { it.category == category }) { type ->
                     Surface(
                         onClick = { onAdd(type) },
@@ -320,14 +428,35 @@ private fun BlockPaletteSheet(onDismiss: () -> Unit, onAdd: (BlockType) -> Unit)
                         tonalElevation = 2.dp,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Column(Modifier.padding(16.dp)) {
-                            Text(type.title, fontWeight = FontWeight.SemiBold)
-                            Spacer(Modifier.height(3.dp))
-                            Text(
-                                type.subtitle,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                style = MaterialTheme.typography.bodyMedium
-                            )
+                        Row(
+                            modifier = Modifier.padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Surface(
+                                shape = MaterialTheme.shapes.medium,
+                                color = blockColor(type),
+                                modifier = Modifier.width(54.dp).height(38.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        when (type.role) {
+                                            BlockRole.COMMAND -> "▶"
+                                            BlockRole.VALUE -> "#"
+                                            BlockRole.CONTAINER -> "↳"
+                                        },
+                                        color = androidx.compose.ui.graphics.Color.White,
+                                        fontWeight = FontWeight.Black
+                                    )
+                                }
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                                    Text(type.title, fontWeight = FontWeight.SemiBold)
+                                    AssistChip(onClick = {}, label = { Text(type.role.title) })
+                                }
+                                Text(type.subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+                            }
                         }
                     }
                 }
@@ -368,8 +497,12 @@ private fun BlockEditorSheet(
                 .padding(horizontal = 20.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            Text(block.type.title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(block.type.title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                AssistChip(onClick = {}, label = { Text(block.type.role.title) })
+            }
             Text(block.type.subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(block.type.role.explanation, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
             when (block.type) {
                 BlockType.DELAY -> {
@@ -390,15 +523,18 @@ private fun BlockEditorSheet(
                 BlockType.ANALOG_READ -> {
                     NumberEditor("Analogeingang A0–A5", primaryText, { primaryText = it }, 0, 5)
                     QuickValues((0..5).toList()) { primaryText = it.toString() }
+                    Text("Dieser Wertblock bekommt in einer nächsten Ausbaustufe passende Werteingänge, zum Beispiel für Vergleiche und Variablen.", style = MaterialTheme.typography.bodySmall)
                 }
                 BlockType.REPEAT -> {
                     NumberEditor("Anzahl Wiederholungen", primaryText, { primaryText = it }, 1, 1000)
                     QuickValues(listOf(2, 5, 10, 20)) { primaryText = it.toString() }
+                    Text("Ziehe Befehlsblöcke in die offene Mitte. Sie werden beim Loslassen eingerastet.", style = MaterialTheme.typography.bodySmall)
                 }
                 BlockType.IF_DIGITAL -> {
                     NumberEditor("Eingang D0–D13", primaryText, { primaryText = it }, 0, 13)
                     Text("Bedingung", style = MaterialTheme.typography.labelLarge)
                     HighLowSelector(flag = flag, onChange = { flag = it })
+                    Text("Ziehe Befehlsblöcke in die offene Mitte. Nur diese Befehle gehören dann zur Bedingung.", style = MaterialTheme.typography.bodySmall)
                 }
             }
 
@@ -411,10 +547,7 @@ private fun BlockEditorSheet(
             }
 
             HorizontalDivider()
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedButton(onClick = onDelete, modifier = Modifier.weight(1f)) {
                     Icon(Icons.Default.Delete, contentDescription = null)
                     Spacer(Modifier.width(6.dp))
@@ -453,9 +586,7 @@ private fun NumberEditor(
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedTextField(
             value = value,
-            onValueChange = { text ->
-                if (text.isEmpty() || text.all { it.isDigit() }) onValueChange(text)
-            },
+            onValueChange = { text -> if (text.isEmpty() || text.all { it.isDigit() }) onValueChange(text) },
             label = { Text(label) },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -475,9 +606,7 @@ private fun NumberEditor(
 @Composable
 private fun QuickValues(values: List<Int>, onValue: (Int) -> Unit) {
     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        items(values) { value ->
-            FilledTonalButton(onClick = { onValue(value) }) { Text(value.toString()) }
-        }
+        items(values) { value -> FilledTonalButton(onClick = { onValue(value) }) { Text(value.toString()) } }
     }
 }
 
@@ -513,7 +642,11 @@ private fun CodeSheet(blocks: List<ProgramBlock>, onDismiss: () -> Unit) {
 
             issues.forEach { issue ->
                 Surface(
-                    color = if (issue.level == IssueLevel.ERROR) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.tertiaryContainer,
+                    color = when (issue.level) {
+                        IssueLevel.ERROR -> MaterialTheme.colorScheme.errorContainer
+                        IssueLevel.WARNING -> MaterialTheme.colorScheme.tertiaryContainer
+                        IssueLevel.INFO -> MaterialTheme.colorScheme.secondaryContainer
+                    },
                     shape = MaterialTheme.shapes.medium,
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -527,11 +660,7 @@ private fun CodeSheet(blocks: List<ProgramBlock>, onDismiss: () -> Unit) {
                 Text("Code kopieren")
             }
 
-            Surface(
-                shape = MaterialTheme.shapes.medium,
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                modifier = Modifier.fillMaxWidth()
-            ) {
+            Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth()) {
                 SelectionContainer {
                     Text(
                         text = code,
