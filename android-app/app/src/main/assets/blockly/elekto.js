@@ -373,8 +373,10 @@
   }
 
   function placeNewBlock(block) {
-    block.initSvg();
-    block.render();
+    if (!block.getSvgRoot?.()) {
+      block.initSvg();
+      block.render();
+    }
 
     const metrics = workspace.getMetrics();
     const scale = workspace.scale || 1;
