@@ -4,15 +4,59 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
   <title>Elekto Blockly POC</title>
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="/assets/blockly/styles.css" />
 </head>
 <body>
   <div id="workspace"></div>
   <div id="hint">Block lange drücken für weitere Optionen</div>
+  <div id="boot" style="position:fixed;left:12px;right:12px;top:64px;z-index:99999;background:#fff;color:#333;border:1px solid #bbb;border-radius:12px;padding:10px;font:13px system-ui;box-shadow:0 4px 16px rgba(0,0,0,.12)">
+    Blockly startet …
+  </div>
 
-  <script src="vendor/blockly_compressed.js"></script>
-  <script src="vendor/blocks_compressed.js"></script>
-  <script src="vendor/msg/de.js"></script>
-  <script src="elekto.js"></script>
+  <script>
+    (function () {
+      const boot = document.getElementById('boot');
+      function status(text, error) {
+        boot.textContent = text;
+        boot.style.color = error ? '#9b1c1c' : '#333';
+        boot.style.borderColor = error ? '#e57373' : '#bbb';
+      }
+      window.__elektoBootStatus = status;
+
+      function load(src, label) {
+        return new Promise((resolve, reject) => {
+          status('Lade ' + label + ' …');
+          const script = document.createElement('script');
+          script.src = src;
+          script.onload = () => {
+            status(label + ' geladen ✓');
+            resolve();
+          };
+          script.onerror = () => reject(new Error(label + ' konnte nicht geladen werden: ' + src));
+          document.head.appendChild(script);
+        });
+      }
+
+      (async () => {
+        try {
+          await load('/assets/blockly/vendor/blockly_compressed.js', 'Blockly');
+          status('Blockly geladen ✓ · Typ: ' + typeof window.Blockly);
+          await load('/assets/blockly/vendor/blocks_compressed.js', 'Standardblöcke');
+          await load('/assets/blockly/vendor/msg/de.js', 'Deutsche Texte');
+          await load('/assets/blockly/elekto.js', 'Elekto-Editor');
+
+          setTimeout(() => {
+            if (window.__ELEKTO_READY) {
+              boot.style.display = 'none';
+            } else {
+              status('Elekto-Skript geladen, aber Editor meldet nicht READY.', true);
+            }
+          }, 500);
+        } catch (e) {
+          status('STARTFEHLER: ' + (e && e.message ? e.message : String(e)), true);
+        }
+      })();
+    })();
+  </script>
 </body>
 </html>
