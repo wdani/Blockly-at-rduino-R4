@@ -1,106 +1,124 @@
 (function () {
     'use strict';
 
-    if (!window.Blockly || !window.PointerEvent) {
+    if (window.__blocklyR4PointerCompatBootstrapInstalled) {
         return;
     }
+    window.__blocklyR4PointerCompatBootstrapInstalled = true;
 
-    // Blockly@rduino still ships a legacy Blockly generation that predates the
-    // modern Pointer Events API. Current Chromium/Edge versions can expose
-    // mouse/touch input in ways that leave the old mousedown/mousemove drag
-    // pipeline unreliable. Keep Blockly's public behaviour, but route the
-    // legacy mouse bindings through Pointer Events on modern engines.
-    var originalBindEventWithChecks = Blockly.bindEventWithChecks_;
-
-    function pointerTypeForLegacyEvent(type) {
-        if (type === 'mousedown') return 'pointerdown';
-        if (type === 'mousemove') return 'pointermove';
-        if (type === 'mouseup') return 'pointerup';
-        return null;
-    }
-
-    Blockly.bindEventWithChecks_ = function (node, eventName, context, func, optNoCaptureIdentifier) {
-        var pointerEventName = pointerTypeForLegacyEvent(eventName);
-
-        if (!pointerEventName) {
-            return originalBindEventWithChecks.call(
-                Blockly,
-                node,
-                eventName,
-                context,
-                func,
-                optNoCaptureIdentifier
-            );
+    function installPointerCompatibility() {
+        if (window.__blocklyR4PointerCompat) {
+            return true;
+        }
+        if (!window.Blockly || !window.PointerEvent ||
+            typeof Blockly.bindEventWithChecks_ !== 'function') {
+            return false;
         }
 
-        var handler = function (event) {
-            if (event.isPrimary === false) {
-                return;
+        // Blockly@rduino ships an older Blockly generation whose drag bindings
+        // were created for mouse/touch events before Pointer Events became the
+        // normal input path in current Chromium/WebView builds.
+        var originalBindEventWithChecks = Blockly.bindEventWithChecks_;
+
+        function pointerTypeForLegacyEvent(type) {
+            if (type === 'mousedown') return 'pointerdown';
+            if (type === 'mousemove') return 'pointermove';
+            if (type === 'mouseup') return 'pointerup';
+            return null;
+        }
+
+        Blockly.bindEventWithChecks_ = function (node, eventName, context, func, optNoCaptureIdentifier) {
+            var pointerEventName = pointerTypeForLegacyEvent(eventName);
+
+            if (!pointerEventName) {
+                return originalBindEventWithChecks.call(
+                    Blockly,
+                    node,
+                    eventName,
+                    context,
+                    func,
+                    optNoCaptureIdentifier
+                );
             }
 
-            // Ignore synthetic/non-primary pointer streams. Mouse, pen and a
-            // single touch pointer all use the same coordinates expected by
-            // the legacy Blockly drag code.
-            if (event.pointerType &&
-                event.pointerType !== 'mouse' &&
-                event.pointerType !== 'pen' &&
-                event.pointerType !== 'touch') {
-                return;
-            }
-
-            if (pointerEventName === 'pointerdown' &&
-                event.currentTarget &&
-                typeof event.currentTarget.setPointerCapture === 'function') {
-                try {
-                    event.currentTarget.setPointerCapture(event.pointerId);
-                } catch (ignore) {
-                    // Pointer capture is only an optimisation. Dragging still
-                    // works through document-level pointermove listeners.
-                }
-            }
-
-            if (context) {
-                func.call(context, event);
-            } else {
-                func(event);
-            }
-        };
-
-        node.addEventListener(pointerEventName, handler, false);
-        var wrappers = [[node, pointerEventName, handler]];
-
-        if (eventName === 'mouseup') {
-            var cancelHandler = function (event) {
+            var handler = function (event) {
                 if (event.isPrimary === false) {
                     return;
                 }
+                if (event.pointerType &&
+                    event.pointerType !== 'mouse' &&
+                    event.pointerType !== 'pen' &&
+                    event.pointerType !== 'touch') {
+                    return;
+                }
+
+                if (pointerEventName === 'pointerdown' &&
+                    event.currentTarget &&
+                    typeof event.currentTarget.setPointerCapture === 'function') {
+                    try {
+                        event.currentTarget.setPointerCapture(event.pointerId);
+                    } catch (ignore) {
+                        // Dragging still works through document-level listeners.
+                    }
+                }
+
                 if (context) {
                     func.call(context, event);
                 } else {
                     func(event);
                 }
             };
-            node.addEventListener('pointercancel', cancelHandler, false);
-            wrappers.push([node, 'pointercancel', cancelHandler]);
-        }
 
-        return wrappers;
-    };
+            node.addEventListener(pointerEventName, handler, false);
+            var wrappers = [[node, pointerEventName, handler]];
 
-    // Prevent the browser from interpreting a drag as viewport panning or a
-    // native gesture. This is especially important on Windows systems that
-    // report touch/pen capability even when a mouse is used.
-    var style = document.createElement('style');
-    style.textContent = [
-        '.blocklySvg,',
-        '.blocklyWorkspace,',
-        '.blocklyFlyout,',
-        '.blocklyDraggable {',
-        '  touch-action: none !important;',
-        '  -ms-touch-action: none !important;',
-        '}'
-    ].join('\n');
-    document.head.appendChild(style);
+            if (eventName === 'mouseup') {
+                var cancelHandler = function (event) {
+                    if (event.isPrimary === false) {
+                        return;
+                    }
+                    if (context) {
+                        func.call(context, event);
+                    } else {
+                        func(event);
+                    }
+                };
+                node.addEventListener('pointercancel', cancelHandler, false);
+                wrappers.push([node, 'pointercancel', cancelHandler]);
+            }
 
-    window.__blocklyR4PointerCompat = true;
+            return wrappers;
+        };
+
+        var style = document.createElement('style');
+        style.id = 'r4-pointer-compat-style';
+        style.textContent = [
+            '.blocklySvg,',
+            '.blocklyWorkspace,',
+            '.blocklyFlyout,',
+            '.blocklyDraggable {',
+            '  touch-action: none !important;',
+            '  -ms-touch-action: none !important;',
+            '}'
+        ].join('\n');
+        (document.head || document.documentElement).appendChild(style);
+
+        window.__blocklyR4PointerCompat = true;
+        return true;
+    }
+
+    // When injected at document start Blockly itself does not exist yet. Patch
+    // it before BlocklyDuino.init() runs from the body's onload handler.
+    if (!installPointerCompatibility()) {
+        var attempts = 0;
+        var timer = window.setInterval(function () {
+            attempts += 1;
+            if (installPointerCompatibility() || attempts >= 400) {
+                window.clearInterval(timer);
+            }
+        }, 5);
+
+        document.addEventListener('DOMContentLoaded', installPointerCompatibility, false);
+        window.addEventListener('load', installPointerCompatibility, false);
+    }
 })();

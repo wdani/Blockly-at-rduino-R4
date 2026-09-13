@@ -11,6 +11,14 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
 import androidx.webkit.WebViewAssetLoader;
+import androidx.webkit.WebViewCompat;
+import androidx.webkit.WebViewFeature;
+
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.util.Collections;
 
 public class MainActivity extends Activity {
     private WebView webView;
@@ -34,6 +42,7 @@ public class MainActivity extends Activity {
             "  }" +
             " }catch(e){console.error('R4 Android board bootstrap failed',e);}" +
             " load('r4/legacy-blockly-pointer-compat.js','r4-android-pointer');" +
+            " load('r4/android-mobile.js','r4-android-mobile');" +
             "});" +
             "})();";
 
@@ -54,8 +63,14 @@ public class MainActivity extends Activity {
         settings.setDatabaseEnabled(true);
         settings.setBuiltInZoomControls(false);
         settings.setDisplayZoomControls(false);
+        settings.setSupportZoom(false);
+        settings.setLoadWithOverviewMode(false);
+        settings.setUseWideViewPort(false);
+        settings.setTextZoom(100);
         settings.setAllowFileAccess(false);
         settings.setAllowContentAccess(false);
+
+        installDocumentStartScripts();
 
         webView.setWebChromeClient(new WebChromeClient());
         webView.setWebViewClient(new WebViewClient() {
@@ -81,6 +96,37 @@ public class MainActivity extends Activity {
         } else {
             webView.restoreState(savedInstanceState);
         }
+    }
+
+    private void installDocumentStartScripts() {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+            return;
+        }
+
+        try {
+            String pointerCompat = readAssetText("www/r4/legacy-blockly-pointer-compat.js");
+            String mobileLayout = readAssetText("www/r4/android-mobile.js");
+            WebViewCompat.addDocumentStartJavaScript(
+                    webView,
+                    pointerCompat + "\n" + mobileLayout,
+                    Collections.singleton("https://appassets.androidplatform.net")
+            );
+        } catch (IOException error) {
+            throw new IllegalStateException("Unable to load Android Blockly bootstrap scripts", error);
+        }
+    }
+
+    private String readAssetText(String path) throws IOException {
+        StringBuilder text = new StringBuilder();
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(getAssets().open(path), StandardCharsets.UTF_8))) {
+            char[] buffer = new char[8192];
+            int count;
+            while ((count = reader.read(buffer)) != -1) {
+                text.append(buffer, 0, count);
+            }
+        }
+        return text.toString();
     }
 
     @Override
