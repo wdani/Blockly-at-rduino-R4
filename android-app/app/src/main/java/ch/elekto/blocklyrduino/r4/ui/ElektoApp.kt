@@ -98,6 +98,8 @@ fun ElektoApp() {
     var showCode by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
     var editingBlock by remember { mutableStateOf<ProgramBlock?>(null) }
+    var selectionMode by remember { mutableStateOf(false) }
+    var selectedBlockIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var draggingBlockId by remember { mutableStateOf<String?>(null) }
 
     val issues by remember { derivedStateOf { ProgramValidator.validate(blocks) } }
@@ -137,24 +139,97 @@ fun ElektoApp() {
         }
     }
 
+    fun toggleSelection(id: String) {
+        selectedBlockIds = if (id in selectedBlockIds) selectedBlockIds - id else selectedBlockIds + id
+    }
+
+    fun selectionMoveRoots(ids: Set<String>): Set<String> {
+        val byId = blocks.associateBy { it.id }
+        fun hasSelectedAncestor(block: ProgramBlock): Boolean {
+            var current = block.valueOwnerId ?: block.parentId ?: block.previousId
+            val seen = mutableSetOf<String>()
+            while (current != null && seen.add(current)) {
+                if (current in ids) return true
+                val parent = byId[current]
+                current = parent?.valueOwnerId ?: parent?.parentId ?: parent?.previousId
+            }
+            return false
+        }
+        return ids.filterTo(linkedSetOf()) { id ->
+            blocks.firstOrNull { it.id == id }?.let { !hasSelectedAncestor(it) } == true
+        }
+    }
+
+    fun detachSelectionForDrag(ids: Set<String>) {
+        val roots = selectionMoveRoots(ids)
+        blocks.indices.forEach { index ->
+            val block = blocks[index]
+            if (block.id !in roots) return@forEach
+            blocks[index] = block.copy(
+                parentId = block.parentId?.takeIf { it in ids },
+                previousId = block.previousId?.takeIf { it in ids },
+                valueOwnerId = block.valueOwnerId?.takeIf { it in ids },
+                valueInputKey = block.valueInputKey?.takeIf { block.valueOwnerId in ids },
+                childOrder = if (block.parentId in ids) block.childOrder else 0
+            )
+        }
+    }
+
     fun detachForDrag(id: String) {
-        draggingBlockId = id
+        if (selectionMode && id in selectedBlockIds && selectedBlockIds.size > 1) {
+            detachSelectionForDrag(selectedBlockIds)
+            return
+        }
         val index = blocks.indexOfFirst { it.id == id }
         if (index < 0) return
         val current = blocks[index]
         if (current.parentId != null || current.previousId != null || current.valueOwnerId != null) {
-            blocks[index] = current.copy(
-                parentId = null,
-                previousId = null,
-                childOrder = 0,
-                valueOwnerId = null,
-                valueInputKey = null
-            )
-            applyNormalized(save = false)
+            blocks[index] = current.copy(parentId = null, previousId = null, childOrder = 0, valueOwnerId = null, valueInputKey = null)
         }
     }
 
+    fun moveSelection(ids: Set<String>, dx: Float, dy: Float) {
+        val roots = selectionMoveRoots(ids)
+        val movingIds = linkedSetOf<String>()
+        roots.forEach { root ->
+            movingIds += root
+            movingIds += linkedDescendantIds(blocks.toList(), root)
+        }
+        blocks.indices.forEach { index ->
+            val block = blocks[index]
+            if (block.id in movingIds) {
+                blocks[index] = block.copy(
+                    xDp = (block.xDp + dx).coerceIn(8f, 1100f),
+                    yDp = (block.yDp + dy).coerceIn(8f, 2070f)
+                )
+            }
+        }
+    }
+
+    fun finishSelectionMove(ids: Set<String>) {
+        val roots = selectionMoveRoots(ids)
+        val movingIds = linkedSetOf<String>()
+        roots.forEach { root ->
+            movingIds += root
+            movingIds += linkedDescendantIds(blocks.toList(), root)
+        }
+        blocks.indices.forEach { index ->
+            val block = blocks[index]
+            if (block.id in movingIds) {
+                blocks[index] = block.copy(
+                    xDp = round(block.xDp / 8f) * 8f,
+                    yDp = round(block.yDp / 8f) * 8f
+                )
+            }
+        }
+        persist()
+    }
+
     fun moveWithConnections(id: String, dx: Float, dy: Float) {
+        if (selectionMode && id in selectedBlockIds && selectedBlockIds.size > 1) {
+            moveSelection(selectedBlockIds, dx, dy)
+            return
+        }
         val linked = linkedDescendantIds(blocks.toList(), id) + id
         blocks.indices.forEach { index ->
             val block = blocks[index]
@@ -168,6 +243,11 @@ fun ElektoApp() {
     }
 
     fun finishMove(id: String) {
+        if (selectionMode && id in selectedBlockIds && selectedBlockIds.size > 1) {
+            draggingBlockId = null
+            finishSelectionMove(selectedBlockIds)
+            return
+        }
         var index = blocks.indexOfFirst { it.id == id }
         if (index < 0) {
             draggingBlockId = null
@@ -299,7 +379,7 @@ fun ElektoApp() {
                     Column {
                         Text("Elekto Blocks", fontWeight = FontWeight.SemiBold)
                         Text(
-                            "UNO R4 WiFi • Alpha 8 • lokal",
+                            "UNO R4 WiFi • Alpha 9 • lokal",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -314,6 +394,14 @@ fun ElektoApp() {
                             Icon(Icons.Default.MoreVert, contentDescription = "Mehr")
                         }
                         DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                            DropdownMenuItem(
+                                text = { Text(if (selectionMode) "Mehrfachauswahl beenden" else "Mehrfachauswahl") },
+                                onClick = {
+                                    showMenu = false
+                                    selectionMode = !selectionMode
+                                    if (!selectionMode) selectedBlockIds = emptySet()
+                                }
+                            )
                             DropdownMenuItem(
                                 text = { Text("Blink-Demo laden") },
                                 onClick = {
@@ -347,11 +435,14 @@ fun ElektoApp() {
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            StatusStrip(blockCount = blocks.size, issues = issues)
+            StatusStrip(blockCount = blocks.size, issues = issues, selectionMode = selectionMode, selectionCount = selectedBlockIds.size, onFinishSelection = { selectionMode = false; selectedBlockIds = emptySet() })
             BlockWorkspace(
                 blocks = blocks,
                 errorBlockIds = errorBlockIds,
                 draggingBlockId = draggingBlockId,
+                selectionMode = selectionMode,
+                selectedBlockIds = selectedBlockIds,
+                onToggleSelection = ::toggleSelection,
                 onMoveStart = ::detachForDrag,
                 onMove = ::moveWithConnections,
                 onMoveFinished = ::finishMove,
@@ -392,7 +483,7 @@ fun ElektoApp() {
 }
 
 @Composable
-private fun StatusStrip(blockCount: Int, issues: List<ValidationIssue>) {
+private fun StatusStrip(blockCount: Int, issues: List<ValidationIssue>, selectionMode: Boolean, selectionCount: Int, onFinishSelection: () -> Unit) {
     val errors = issues.count { it.level == IssueLevel.ERROR }
     val warnings = issues.count { it.level == IssueLevel.WARNING }
 
@@ -403,7 +494,10 @@ private fun StatusStrip(blockCount: Int, issues: List<ValidationIssue>) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             AssistChip(onClick = {}, label = { Text("$blockCount Blöcke") })
-            when {
+            if (selectionMode) {
+                Text("$selectionCount ausgewählt", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                FilledTonalButton(onClick = onFinishSelection) { Text("Fertig") }
+            } else when {
                 errors > 0 -> Text("$errors Fehler", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
                 warnings > 0 -> Text("$warnings Hinweise", color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.labelLarge)
                 else -> Text("Prüfung OK", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
