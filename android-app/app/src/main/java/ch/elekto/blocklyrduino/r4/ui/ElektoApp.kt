@@ -102,6 +102,9 @@ fun ElektoApp() {
     var selectionMode by remember { mutableStateOf(false) }
     var selectedBlockIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var draggingBlockId by remember { mutableStateOf<String?>(null) }
+    var dragOriginParentId by remember { mutableStateOf<String?>(null) }
+    var dragOriginPreviousId by remember { mutableStateOf<String?>(null) }
+    var dragOriginValueOwnerId by remember { mutableStateOf<String?>(null) }
 
     val issues by remember { derivedStateOf { ProgramValidator.validate(blocks) } }
     val errorBlockIds by remember {
@@ -252,12 +255,18 @@ fun ElektoApp() {
     fun finishMove(id: String) {
         if (selectionMode && id in selectedBlockIds && selectedBlockIds.size > 1) {
             draggingBlockId = null
+            dragOriginParentId = null
+            dragOriginPreviousId = null
+            dragOriginValueOwnerId = null
             finishSelectionMove(selectedBlockIds)
             return
         }
         var index = blocks.indexOfFirst { it.id == id }
         if (index < 0) {
             draggingBlockId = null
+            dragOriginParentId = null
+            dragOriginPreviousId = null
+            dragOriginValueOwnerId = null
             return
         }
 
@@ -272,10 +281,26 @@ fun ElektoApp() {
             valueInputKey = null
         )
 
-        val target = findSnapTarget(blocks.toList(), id)
+        val rawTarget = findSnapTarget(blocks.toList(), id)
         val moving = blocks.firstOrNull { it.id == id }
+
+        // When pulling a single block out of an existing connection, do not let
+        // it immediately snap back into exactly the same old socket/container.
+        // The user must first move away and then approach it again deliberately.
+        val target = when (rawTarget) {
+            is SnapTarget.Container ->
+                if (rawTarget.parentId == dragOriginParentId) null else rawTarget
+            is SnapTarget.Statement ->
+                if (rawTarget.previousId == dragOriginPreviousId) null else rawTarget
+            is SnapTarget.Value ->
+                if (rawTarget.ownerId == dragOriginValueOwnerId) null else rawTarget
+            null -> null
+        }
         if (moving == null) {
             draggingBlockId = null
+            dragOriginParentId = null
+            dragOriginPreviousId = null
+            dragOriginValueOwnerId = null
             return
         }
 
@@ -355,6 +380,9 @@ fun ElektoApp() {
 
         applyNormalized(save = true)
         draggingBlockId = null
+        dragOriginParentId = null
+        dragOriginPreviousId = null
+        dragOriginValueOwnerId = null
     }
 
     fun deleteBlock(id: String) {
@@ -386,7 +414,7 @@ fun ElektoApp() {
                     Column {
                         Text("Elekto Blocks", fontWeight = FontWeight.SemiBold)
                         Text(
-                            "UNO R4 WiFi • Alpha 10 • lokal",
+                            "UNO R4 WiFi • Alpha 11 • lokal",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -455,7 +483,11 @@ fun ElektoApp() {
                 selectedBlockIds = selectedBlockIds,
                 onToggleSelection = ::toggleSelection,
                 onMoveStart = { id ->
+                    val origin = blocks.firstOrNull { it.id == id }
                     draggingBlockId = id
+                    dragOriginParentId = origin?.parentId
+                    dragOriginPreviousId = origin?.previousId
+                    dragOriginValueOwnerId = origin?.valueOwnerId
                     detachForDrag(id)
                 },
                 onMove = ::moveWithConnections,
@@ -585,12 +617,16 @@ private fun BlockPaletteSheet(onDismiss: () -> Unit, onAdd: (BlockType) -> Unit)
                                 type = type,
                                 modifier = Modifier.width(166.dp).height(82.dp)
                             )
-                            Column(modifier = Modifier.weight(1f)) {
-                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                                    Text(type.title, fontWeight = FontWeight.SemiBold)
-                                    AssistChip(onClick = {}, label = { Text(type.role.title) })
-                                }
-                                Text(type.subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(type.title, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    type.subtitle,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
                             }
                         }
                     }
