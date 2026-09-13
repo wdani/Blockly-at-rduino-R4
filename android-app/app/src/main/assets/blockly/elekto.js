@@ -1,13 +1,24 @@
 (() => {
   'use strict';
 
+  function showFatal(error) {
+    const box = document.createElement('div');
+    box.style.cssText = 'position:fixed;left:12px;right:12px;top:70px;z-index:99999;background:#fff0f0;color:#8b1d1d;border:2px solid #e57373;border-radius:12px;padding:12px;font:14px system-ui;white-space:pre-wrap;box-shadow:0 4px 18px rgba(0,0,0,.16)';
+    box.textContent = 'Blockly konnte nicht gestartet werden:\n' + (error?.stack || error?.message || String(error));
+    document.body.appendChild(box);
+  }
+
+  window.addEventListener('error', e => showFatal(e.error || e.message));
+  window.addEventListener('unhandledrejection', e => showFatal(e.reason));
+
+  try {
   if (typeof Blockly === 'undefined') {
     document.body.innerHTML = '<p style="padding:20px">Blockly konnte nicht geladen werden.</p>';
     return;
   }
 
   const elektoTheme = Blockly.Theme.defineTheme('elekto', {
-    base: Blockly.Themes.Zelos,
+    base: Blockly.Themes.Zelos || Blockly.Themes.Classic,
     blockStyles: {
       time_blocks: { colourPrimary: '#6C55C7', colourSecondary: '#5A46AA', colourTertiary: '#48368D' },
       io_blocks: { colourPrimary: '#16865C', colourSecondary: '#11714D', colourTertiary: '#0D5B3E' },
@@ -32,11 +43,7 @@
       scrollbarColour: '#AEB1BC',
       insertionMarkerColour: '#55A9FF',
       insertionMarkerOpacity: 0.45,
-      cursorColour: '#2E87E8',
-      selectedGlowColour: '#55A9FF',
-      selectedGlowOpacity: 0.35,
-      replacementGlowColour: '#55A9FF',
-      replacementGlowOpacity: 0.35
+      cursorColour: '#2E87E8'
     },
     fontStyle: {
       family: 'system-ui, sans-serif',
@@ -138,16 +145,7 @@
           {
             kind: 'block', type: 'elekto_if',
             inputs: {
-              COND: {
-                block: {
-                  type: 'logic_compare',
-                  fields: { OP: 'GT' },
-                  inputs: {
-                    A: { shadow: { type: 'elekto_analog_read', fields: { PIN: 'A0' } } },
-                    B: { shadow: { type: 'math_number', fields: { NUM: 500 } } }
-                  }
-                }
-              }
+              COND: { shadow: { type: 'logic_boolean', fields: { BOOL: 'TRUE' } } }
             }
           }
         ]
@@ -354,4 +352,8 @@
 
   if (!restore()) loadDemo();
   window.addEventListener('resize', () => Blockly.svgResize(workspace));
+  } catch (error) {
+    console.error(error);
+    showFatal(error);
+  }
 })();
