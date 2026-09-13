@@ -24,12 +24,33 @@ jobs:
         with:
           gradle-version: '8.10.2'
 
+      - name: Prepare stable alpha signing key
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p android-app/signing
+          BASE='https://android.googlesource.com/platform/build/+/refs/tags/android-14.0.0_r1/target/product/security'
+          curl -fsSL "$BASE/testkey.pk8?format=TEXT" | base64 --decode > /tmp/aosp-testkey.pk8
+          curl -fsSL "$BASE/testkey.x509.pem?format=TEXT" | base64 --decode > /tmp/aosp-testkey.x509.pem
+          openssl pkcs8 -inform DER -nocrypt -in /tmp/aosp-testkey.pk8 -out /tmp/aosp-testkey.pem
+          openssl pkcs12 -export \
+            -in /tmp/aosp-testkey.x509.pem \
+            -inkey /tmp/aosp-testkey.pem \
+            -out android-app/signing/alpha-testkey.p12 \
+            -name elektoAlpha \
+            -passout pass:android
+          keytool -list -v \
+            -keystore android-app/signing/alpha-testkey.p12 \
+            -storetype PKCS12 \
+            -storepass android \
+            -alias elektoAlpha | grep -E 'SHA256:|Owner:|Valid from:' || true
+
       - name: Build debug APK
         run: gradle -p android-app :app:assembleDebug
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Blockly-rduino-R4-Android-debug
+          name: Blockly-rduino-R4-Android-alpha4-stable-signing
           path: android-app/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
