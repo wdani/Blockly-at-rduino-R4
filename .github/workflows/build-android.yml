@@ -44,12 +44,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'npm'
-          cache-dependency-path: android-app/blockly-package/package-lock.json
 
       - name: Prepare Blockly 13.3.0 assets
         run: |
-          npm ci --prefix android-app/blockly-package
+          npm install --prefix android-app/blockly-package --no-save --ignore-scripts blockly@13.3.0
           mkdir -p android-app/app/src/main/assets/blockly/vendor/msg
           cp android-app/blockly-package/node_modules/blockly/blockly_compressed.js android-app/app/src/main/assets/blockly/vendor/
           cp android-app/blockly-package/node_modules/blockly/blocks_compressed.js android-app/app/src/main/assets/blockly/vendor/
