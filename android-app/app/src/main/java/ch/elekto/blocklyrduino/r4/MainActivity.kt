@@ -67,14 +67,10 @@ private fun BlocklyPocApp() {
         topBar = {
             TopAppBar(
                 title = {
-                    Column {
-                        Text("Elekto Blocks • Blockly POC")
-                        Text(
-                            "Moderner Blockly-Kern • offline • Vergleichstest",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                    Text(
+                        "Elekto • Blockly POC",
+                        style = MaterialTheme.typography.titleMedium
+                    )
                 },
                 actions = {
                     IconButton(onClick = { webView?.evaluateJavascript("window.Elekto.requestCode()", null) }) {
