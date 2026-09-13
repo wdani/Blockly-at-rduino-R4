@@ -76,9 +76,20 @@ Dropdown / long-press correction:
 - Blockly field/dropdown menus are kept above the workspace and receive larger touch targets plus bounded mobile height/scrolling.
 - Android versionCode incremented to 4.
 
+### Stable alpha update channel (starts with alpha.4)
+
+The first three APKs were normal CI debug builds and therefore did not provide a dependable long-term signing identity. Starting with alpha.4, the Android alpha channel is deliberately separated from the future production app:
+
+- stable alpha application ID: `ch.elekto.blocklyrduino.r4.alpha`;
+- stable public development signing identity generated from the Android Open Source Project `testkey` pinned to tag `android-14.0.0_r1`;
+- future alpha builds keep the same application ID/signing identity and only increase `versionCode`;
+- a future production/store build will use a separate private release/upload key and will not reuse the public development key.
+
+This means alpha.4 is the baseline for in-place alpha updates. Alpha 5, Alpha 6, etc. should install directly over alpha.4 without uninstalling it first.
+
 ## Current milestone
 
-The core mobile interaction proof-of-concept is successful: Blockly loads offline in the Android app and touch dragging works on real hardware. Alpha 4 focuses on making editable block fields/dropdowns stable on touch devices.
+The core mobile interaction proof-of-concept is successful: Blockly loads offline in the Android app and touch dragging works on real hardware. Alpha 4 focuses on making editable block fields/dropdowns stable on touch devices and establishes the stable alpha update channel.
 
 ## Mobile UI direction
 
@@ -99,6 +110,7 @@ Principles for the mobile layout:
 ## Next phases
 
 - Verify Alpha 4: dropdowns remain open and selectable without the workspace context menu appearing.
+- Verify Alpha 4 as the stable update baseline before moving to Alpha 5.
 - Replace the inherited desktop chrome with a deliberate mobile app shell rather than progressively hiding desktop elements.
 - Design a compact mobile project/editor flow with only the controls needed on a phone.
 - Decide whether the long-term editor remains modern Blockly embedded in a native Kotlin/Compose app or becomes a custom native block editor.
