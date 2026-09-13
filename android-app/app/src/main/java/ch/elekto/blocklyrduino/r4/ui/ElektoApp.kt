@@ -180,18 +180,9 @@ fun ElektoApp() {
     }
 
     fun detachForDrag(id: String) {
-        if (selectionMode && id in selectedBlockIds && selectedBlockIds.size > 1) {
-            // Keep relationships untouched while the finger is down. This prevents
-            // the selected group from jumping when a parent/child relation changes.
-            return
-        }
-        val index = blocks.indexOfFirst { it.id == id }
-        if (index < 0) return
-        val current = blocks[index]
-        if (current.parentId != null || current.previousId != null || current.valueOwnerId != null) {
-            blocks[index] = current.copy(parentId = null, previousId = null, childOrder = 0, valueOwnerId = null, valueInputKey = null)
-        }
-        // Keep absolute coordinates while dragging. Normalizing here made nested blocks jump away from the finger.
+        // Keep graph relationships unchanged during the active pointer gesture.
+        // The connection is resolved only after finger-up in finishMove().
+        return
     }
 
     fun moveSelection(ids: Set<String>, dx: Float, dy: Float) {
@@ -615,7 +606,7 @@ private fun BlockPaletteSheet(onDismiss: () -> Unit, onAdd: (BlockType) -> Unit)
                         ) {
                             BlockTypePreview(
                                 type = type,
-                                modifier = Modifier.width(166.dp).height(82.dp)
+                                modifier = Modifier.width(166.dp).height(112.dp)
                             )
                             Column(
                                 modifier = Modifier.weight(1f),
