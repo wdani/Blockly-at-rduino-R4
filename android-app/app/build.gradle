@@ -1,5 +1,7 @@
 plugins {
     id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+    id 'org.jetbrains.kotlin.plugin.compose'
 }
 
 def alphaKeystore = rootProject.file('signing/alpha-testkey.p12')
@@ -19,45 +21,52 @@ android {
     }
 
     defaultConfig {
-        // Keep alpha/test builds isolated from a future production package.
-        // Starting with alpha.4 this ID remains stable so later APKs can update in place.
         applicationId 'ch.elekto.blocklyrduino.r4.alpha'
         minSdk 26
         targetSdk 35
-        versionCode 4
-        versionName '0.1.0-alpha.4'
+        versionCode 5
+        versionName '0.2.0-alpha.5'
     }
 
     buildTypes {
         debug {
-            // GitHub Actions creates this PKCS12 file before Gradle starts.
-            // Local builds without it fall back to the normal Android debug signing key.
             if (alphaKeystore.exists()) {
                 signingConfig signingConfigs.alphaTest
             }
         }
     }
-}
 
-def generatedBlocklyAssets = layout.buildDirectory.dir('generated/blocklyAssets')
-
-tasks.register('copyBlocklyAssets', Copy) {
-    from(rootProject.projectDir.parentFile) {
-        exclude '.git/**'
-        exclude '.github/**'
-        exclude 'android-app/**'
-        exclude 'desktop/**'
-        exclude 'node_modules/**'
-        exclude 'dist/**'
-        exclude 'release/**'
-        exclude '*.zip'
+    buildFeatures {
+        compose true
     }
-    into(generatedBlocklyAssets.map { new File(it.asFile, 'www') })
-}
 
-android.sourceSets.main.assets.srcDir(generatedBlocklyAssets)
-preBuild.dependsOn(copyBlocklyAssets)
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+
+    packaging {
+        resources {
+            excludes += '/META-INF/{AL2.0,LGPL2.1}'
+        }
+    }
+}
 
 dependencies {
-    implementation 'androidx.webkit:webkit:1.12.1'
+    def composeBom = platform('androidx.compose:compose-bom:2024.12.01')
+    implementation composeBom
+
+    implementation 'androidx.core:core-ktx:1.15.0'
+    implementation 'androidx.activity:activity-compose:1.10.1'
+    implementation 'androidx.compose.ui:ui'
+    implementation 'androidx.compose.ui:ui-tooling-preview'
+    implementation 'androidx.compose.foundation:foundation'
+    implementation 'androidx.compose.material3:material3'
+    implementation 'androidx.compose.material:material-icons-extended'
+
+    debugImplementation 'androidx.compose.ui:ui-tooling'
 }
