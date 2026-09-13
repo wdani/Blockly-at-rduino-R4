@@ -555,9 +555,7 @@ private fun ValueSocket(
         return
     }
     Surface(
-        modifier = modifier
-            .width(widthDp.dp)
-            .height(ValueHeightDp.dp)
+        modifier = modifier.width(widthDp.dp).height(ValueHeightDp.dp)
             .border(1.dp, Color.White.copy(alpha = 0.42f), shape),
         shape = shape,
         color = Color.Black.copy(alpha = 0.18f)
