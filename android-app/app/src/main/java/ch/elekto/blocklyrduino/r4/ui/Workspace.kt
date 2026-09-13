@@ -579,6 +579,58 @@ private fun nestingDepth(block: ProgramBlock, blocks: List<ProgramBlock>): Int {
     return depth
 }
 
+@Composable
+fun BlockTypePreview(type: BlockType, modifier: Modifier = Modifier) {
+    val sample = ProgramBlock(type = type, xDp = 0f, yDp = 0f)
+    val empty = listOf(sample)
+
+    val previewWidth = when (type.role) {
+        BlockRole.VALUE -> if (type.outputType == ValueType.BOOLEAN) 132.dp else 112.dp
+        BlockRole.COMMAND -> 150.dp
+        BlockRole.CONTAINER -> 156.dp
+    }
+    val previewHeight = when (type.role) {
+        BlockRole.CONTAINER -> 78.dp
+        else -> 48.dp
+    }
+
+    val shape: Shape = when (type.role) {
+        BlockRole.COMMAND -> statementShape(150f)
+        BlockRole.VALUE -> if (type.outputType == ValueType.BOOLEAN) BooleanValueShape else NumberValueShape
+        BlockRole.CONTAINER -> containerShape(156f, 78f)
+    }
+
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        Surface(
+            modifier = Modifier.width(previewWidth).height(previewHeight),
+            shape = shape,
+            color = blockColor(type),
+            shadowElevation = 2.dp
+        ) {
+            Box(contentAlignment = if (type.role == BlockRole.CONTAINER) Alignment.TopStart else Alignment.Center) {
+                Text(
+                    text = when (type) {
+                        BlockType.DELAY -> "Warten"
+                        BlockType.DIGITAL_WRITE -> "Digitaler"
+                        BlockType.PWM_WRITE -> "PWM"
+                        BlockType.ANALOG_READ -> "Analog A0"
+                        BlockType.NUMBER_LITERAL -> "1000"
+                        BlockType.DIGITAL_READ_BOOL -> "D2 = HIGH"
+                        BlockType.COMPARE_NUMBER -> "100 > 50"
+                        BlockType.REPEAT -> "Wiederhole 10×"
+                        BlockType.IF_DIGITAL -> "Wenn …"
+                    },
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = if (type.role == BlockRole.CONTAINER) 10.sp else 11.sp,
+                    maxLines = 1,
+                    modifier = if (type.role == BlockRole.CONTAINER) Modifier.padding(start = 10.dp, top = 9.dp) else Modifier.padding(horizontal = 8.dp)
+                )
+            }
+        }
+    }
+}
+
 fun operatorLabel(option: String): String = when (option) {
     "EQ" -> "="
     "NE" -> "≠"
