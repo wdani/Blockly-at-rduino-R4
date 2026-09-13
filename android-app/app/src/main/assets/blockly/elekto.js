@@ -1,5 +1,6 @@
 (() => {
   'use strict';
+  window.__ELEKTO_STARTED = true;
 
   function showFatal(error) {
     const box = document.createElement('div');
@@ -351,6 +352,8 @@
   };
 
   if (!restore()) loadDemo();
+  window.__ELEKTO_READY = true;
+  if (window.__elektoBootStatus) window.__elektoBootStatus('Elekto-Editor bereit ✓');
   window.addEventListener('resize', () => Blockly.svgResize(workspace));
   } catch (error) {
     console.error(error);
