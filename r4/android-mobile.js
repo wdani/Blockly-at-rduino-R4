@@ -42,9 +42,6 @@
             '}',
             'html.r4-android-mobile body { position: fixed !important; inset: 0 !important; }',
             '',
-            '/* Hide only Blockly@rduino desktop chrome. Blockly itself keeps control',
-            '   of its SVG, toolbox and flyout geometry. Alpha 2 forced the SVG over',
-            '   the whole viewport and could cover the toolbox on real phones. */',
             'html.r4-android-mobile #header,',
             'html.r4-android-mobile #menuPanel { display: none !important; }',
             '',
@@ -75,8 +72,6 @@
             '  overflow: hidden !important;',
             '}',
             '',
-            '/* Do not change position/size of .blocklySvg here. Blockly.inject()',
-            '   calculates those values and also positions the toolbox/flyout. */',
             'html.r4-android-mobile .blocklySvg,',
             'html.r4-android-mobile .blocklyWorkspace,',
             'html.r4-android-mobile .blocklyFlyout,',
@@ -103,6 +98,26 @@
             'html.r4-android-mobile .blocklyTreeLabel {',
             '  font-size: 12px !important;',
             '  white-space: nowrap !important;',
+            '}',
+            '',
+            'html.r4-android-mobile .blocklyWidgetDiv {',
+            '  z-index: 300 !important;',
+            '  max-width: calc(100vw - 16px) !important;',
+            '}',
+            'html.r4-android-mobile .blocklyWidgetDiv .goog-menu {',
+            '  max-width: calc(100vw - 24px) !important;',
+            '  max-height: 60dvh !important;',
+            '  overflow-x: hidden !important;',
+            '  overflow-y: auto !important;',
+            '  -webkit-overflow-scrolling: touch;',
+            '  touch-action: pan-y !important;',
+            '}',
+            'html.r4-android-mobile .blocklyWidgetDiv .goog-menuitem {',
+            '  min-height: 44px !important;',
+            '  line-height: 44px !important;',
+            '  font-size: 16px !important;',
+            '  padding-left: 14px !important;',
+            '  padding-right: 14px !important;',
             '}',
             '',
             'html.r4-android-mobile #btn_delete {',
@@ -143,8 +158,6 @@
         toolbox.style.visibility = 'visible';
         toolbox.style.zIndex = '80';
 
-        /* Only repair clearly invalid/off-screen values. Do not impose a custom
-           width/left position when Blockly has already calculated a valid one. */
         var rect = toolbox.getBoundingClientRect();
         if (rect.right <= 0 || rect.left >= window.innerWidth) {
             toolbox.style.left = '0px';
@@ -153,6 +166,25 @@
         if (rect.bottom <= 0 || rect.top >= window.innerHeight) {
             toolbox.style.top = '0px';
         }
+    }
+
+    function installContextMenuGuard() {
+        if (window.__blocklyR4AndroidContextGuardInstalled) {
+            return;
+        }
+        window.__blocklyR4AndroidContextGuardInstalled = true;
+
+        document.addEventListener('contextmenu', function (event) {
+            var target = event.target;
+            if (!target || !target.closest) {
+                return;
+            }
+            if (target.closest('.blocklySvg') ||
+                target.closest('.blocklyWidgetDiv') ||
+                target.closest('.blocklyToolboxDiv')) {
+                event.preventDefault();
+            }
+        }, true);
     }
 
     function resizeBlockly() {
@@ -170,6 +202,7 @@
     function applyMobileMode() {
         ensureViewport();
         installMobileStyles();
+        installContextMenuGuard();
         window.setTimeout(resizeBlockly, 0);
         window.setTimeout(resizeBlockly, 100);
         window.setTimeout(resizeBlockly, 300);
