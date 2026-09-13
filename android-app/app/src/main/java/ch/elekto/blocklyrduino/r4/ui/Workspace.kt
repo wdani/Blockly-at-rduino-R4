@@ -590,14 +590,14 @@ fun BlockTypePreview(type: BlockType, modifier: Modifier = Modifier) {
         BlockRole.CONTAINER -> 156.dp
     }
     val previewHeight = when (type.role) {
-        BlockRole.CONTAINER -> 78.dp
+        BlockRole.CONTAINER -> 88.dp
         else -> 48.dp
     }
 
     val shape: Shape = when (type.role) {
         BlockRole.COMMAND -> statementShape(150f)
         BlockRole.VALUE -> if (type.outputType == ValueType.BOOLEAN) BooleanValueShape else NumberValueShape
-        BlockRole.CONTAINER -> containerShape(156f, 78f)
+        BlockRole.CONTAINER -> containerShape(156f, 88f)
     }
 
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
@@ -608,6 +608,15 @@ fun BlockTypePreview(type: BlockType, modifier: Modifier = Modifier) {
             shadowElevation = 2.dp
         ) {
             Box(contentAlignment = if (type.role == BlockRole.CONTAINER) Alignment.TopStart else Alignment.Center) {
+                if (type.role == BlockRole.CONTAINER) {
+                    Box(
+                        modifier = Modifier
+                            .offset(x = 34.dp, y = 44.dp)
+                            .width(108.dp)
+                            .height(18.dp)
+                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f), RoundedCornerShape(5.dp))
+                    )
+                }
                 Text(
                     text = when (type) {
                         BlockType.DELAY -> "Warten"
