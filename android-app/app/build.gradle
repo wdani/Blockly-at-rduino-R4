@@ -2,16 +2,40 @@ plugins {
     id 'com.android.application'
 }
 
+def alphaKeystore = rootProject.file('signing/alpha-testkey.p12')
+
 android {
     namespace 'ch.elekto.blocklyrduino.r4'
     compileSdk 35
 
+    signingConfigs {
+        alphaTest {
+            storeFile alphaKeystore
+            storePassword 'android'
+            keyAlias 'elektoAlpha'
+            keyPassword 'android'
+            storeType 'PKCS12'
+        }
+    }
+
     defaultConfig {
-        applicationId 'ch.elekto.blocklyrduino.r4'
+        // Keep alpha/test builds isolated from a future production package.
+        // Starting with alpha.4 this ID remains stable so later APKs can update in place.
+        applicationId 'ch.elekto.blocklyrduino.r4.alpha'
         minSdk 26
         targetSdk 35
         versionCode 4
         versionName '0.1.0-alpha.4'
+    }
+
+    buildTypes {
+        debug {
+            // GitHub Actions creates this PKCS12 file before Gradle starts.
+            // Local builds without it fall back to the normal Android debug signing key.
+            if (alphaKeystore.exists()) {
+                signingConfig signingConfigs.alphaTest
+            }
+        }
     }
 }
 
