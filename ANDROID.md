@@ -71,10 +71,18 @@ Dropdown / long-press correction:
 
 - Real-device test exposed another legacy touch issue: while using an editable block field/dropdown, the dropdown can disappear after a short hold and Blockly opens the workspace context menu with actions such as Undo/Redo/Clean up.
 - Root cause: the legacy Blockly touch layer registers `touchstart` long-press handlers on both the workspace and every block. After `LONGPRESS` it converts the touch into a synthetic right-click (`button = 2`) and calls the normal context-menu path.
-- Android now disables this old touch-long-press context-menu gesture while preserving normal pointer dragging and field interaction.
+- Android disables this old touch-long-press context-menu gesture while preserving normal pointer dragging and field interaction.
 - Browser/WebView context menus are suppressed inside the Blockly editor area.
 - Blockly field/dropdown menus are kept above the workspace and receive larger touch targets plus bounded mobile height/scrolling.
 - Android versionCode incremented to 4.
+
+Further real-device findings from alpha.4:
+
+- Blockly content can extend into the Android status-bar area. Dragging near the top can therefore pull down the Android notification shade instead of continuing the editor gesture.
+- Some legacy blocks display broken/missing image assets.
+- Legacy inline numeric/text fields are not reliably editable on the phone; examples include angle values and loop start/end values.
+- The toolbox/flyout still consumes too much horizontal space in portrait mode.
+- These are no longer treated as isolated bugs to patch one-by-one. Together they confirm that the inherited 2016 desktop/web UI is the wrong long-term Android surface.
 
 ### Stable alpha update channel (starts with alpha.4)
 
@@ -89,32 +97,53 @@ This means alpha.4 is the baseline for in-place alpha updates. Alpha 5, Alpha 6,
 
 ## Current milestone
 
-The core mobile interaction proof-of-concept is successful: Blockly loads offline in the Android app and touch dragging works on real hardware. Alpha 4 focuses on making editable block fields/dropdowns stable on touch devices and establishes the stable alpha update channel.
+The legacy Android wrapper has completed its purpose as a proof-of-concept:
 
-## Mobile UI direction
+- offline APK startup works;
+- the UNO R4 profile can be loaded;
+- Blockly-style categories and blocks render;
+- touch drag from the flyout to the workspace works on real Android hardware;
+- the stable alpha update channel exists.
 
-The final Android app should not copy the desktop Blockly@rduino layout one-to-one. The working editor behaviour should stay stable while the app shell is redesigned specifically for phones and tablets.
+The legacy Blockly@rduino mobile UI is now **frozen as a reference/proof-of-concept**. New work should not spend time progressively patching the old desktop surface unless a fix is required to recover data or validate one specific technical assumption.
 
-Principles for the mobile layout:
+## Architecture direction after alpha.4
 
-- Keep the workspace as the main surface; avoid permanently occupying large areas with desktop-style panels.
-- Use a compact top app bar for project title, board/connection status and a small number of primary actions.
-- Open block categories in a temporary drawer, bottom sheet or popup rather than reserving nearly half the screen permanently.
-- Use bottom sheets / dialogs for block-specific settings, board selection, code view, serial monitor, compile/upload status and advanced options.
-- Make popups large enough for touch, scrollable when needed, and easy to dismiss without losing the current workspace.
-- Group larger functions into clear sections/chapters instead of exposing everything at once.
-- Keep beginner and advanced functions separated so the interface can grow without becoming crowded.
-- Preserve portrait usability; landscape/tablet layouts may expose more controls but must not be required for normal use.
-- Long-press should not secretly trigger destructive or global workspace actions. Such actions belong in an explicit overflow/menu surface.
+The next Android version should be designed as an app first, not as a website adapted to a phone.
+
+Core principles:
+
+- Keep the stable alpha package/signing identity so the new architecture can still update alpha.4 in place.
+- Build the application shell natively with Kotlin/Jetpack Compose.
+- Respect Android system insets/status/navigation bars so editor gestures never compete with the notification shade.
+- Make the workspace the main surface and avoid permanently occupying large areas with desktop-style panels.
+- Use temporary drawers, bottom sheets and dialogs for categories, block settings, board selection, code view, serial monitor, compile/upload status and advanced options.
+- Treat block values/settings as structured data, not as fragile inline HTML fields. On phones, editing a number, pin, text value or mode may open a native popup/bottom sheet with large touch targets.
+- Store block/program state in an editor-independent model (for example JSON/domain objects). The visual editor and Arduino code generator should consume the same model.
+- Keep Arduino code generation separate from rendering so the editor can later change without rewriting the compiler/upload pipeline.
+- Package icons/images as local app resources; do not depend on old web-relative asset paths.
+- Group functions into clear sections/chapters and allow beginner/advanced levels rather than exposing every possible block at once.
+- Preserve portrait usability; landscape/tablet layouts may expose more controls but must not be required.
+- Long-press must not secretly trigger destructive/global workspace actions; those belong in explicit menus.
+
+### Editor engine decision
+
+Two approaches remain valid and should be evaluated deliberately:
+
+1. **Modern Blockly engine inside a native Compose app shell** – faster route, mature snapping/connection logic, but the canvas remains HTML/SVG/JavaScript internally.
+2. **Custom native block editor** – more work, but complete control over touch, layout, block settings and long-term Android UX.
+
+The next technical prototype should use a very small block set (for example number, delay, digital output, repeat and if/else) and test the custom native editor approach before committing to hundreds of blocks. If the native model/drag/snap prototype proves clean, continue natively; otherwise use modern Blockly only as the editor engine while keeping the rest of the app native.
 
 ## Next phases
 
-- Verify Alpha 4: dropdowns remain open and selectable without the workspace context menu appearing.
-- Verify Alpha 4 as the stable update baseline before moving to Alpha 5.
-- Replace the inherited desktop chrome with a deliberate mobile app shell rather than progressively hiding desktop elements.
-- Design a compact mobile project/editor flow with only the controls needed on a phone.
-- Decide whether the long-term editor remains modern Blockly embedded in a native Kotlin/Compose app or becomes a custom native block editor.
-- Preserve the now-working touch/drag behaviour while the UI is redesigned.
+- Freeze the legacy WebView prototype at alpha.4 as the reference baseline.
+- Start the app-first Android architecture while keeping the same alpha package/signing channel.
+- Implement a native project/editor shell with correct Android system insets.
+- Define the editor-independent program/block data model.
+- Prototype a small touch-first native block canvas and compare it against modern Blockly embedded only as an editor engine.
+- Add mobile-native block value/settings editing through dialogs/bottom sheets.
+- Add local project save/load before relying on more complex UI work.
 - Native Android USB device detection.
 - UNO R4 WiFi 1200-baud reset / SAM-BA-BOSSAC upload path.
 - Serial monitor support where practical.
