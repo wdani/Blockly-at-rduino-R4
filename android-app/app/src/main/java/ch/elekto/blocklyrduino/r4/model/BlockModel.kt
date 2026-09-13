@@ -156,7 +156,7 @@ private const val InlineGapDp = 10f
 private const val OperatorWidthDp = 48f
 
 private fun approximateTextWidthDp(text: String, fontSp: Float = 14f): Float =
-    max(18f, text.length * fontSp * 0.52f)
+    max(18f, text.length * fontSp * 0.64f)
 
 fun directChildren(blocks: List<ProgramBlock>, parentId: String): List<ProgramBlock> =
     blocks.filter { it.parentId == parentId }
