@@ -45,87 +45,117 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ch.elekto.blocklyrduino.r4.model.BlockRole
 import ch.elekto.blocklyrduino.r4.model.BlockType
+import ch.elekto.blocklyrduino.r4.model.CommandWidthDp
+import ch.elekto.blocklyrduino.r4.model.ContainerHeaderDp
+import ch.elekto.blocklyrduino.r4.model.ContainerWidthDp
 import ch.elekto.blocklyrduino.r4.model.ProgramBlock
+import ch.elekto.blocklyrduino.r4.model.ValueType
+import ch.elekto.blocklyrduino.r4.model.ValueWidthDp
 import ch.elekto.blocklyrduino.r4.model.blockHeightDp
+import ch.elekto.blocklyrduino.r4.model.connectedValue
 import ch.elekto.blocklyrduino.r4.model.directChildren
+import ch.elekto.blocklyrduino.r4.model.valueSocketOffset
 import kotlin.math.roundToInt
 
 private val WorkspaceWidth = 1400.dp
 private val WorkspaceHeight = 2200.dp
-private val CommandWidth = 220.dp
-private val ValueWidth = 178.dp
-private val ContainerWidth = 286.dp
 
+/**
+ * Statement grammar: an inward previous-connection socket at the top and a
+ * matching outward next-connection tab at the bottom. The geometry, not the
+ * colour, tells the learner that these blocks form a sequence.
+ */
 private val StatementShape = GenericShape { size, _ ->
     val w = size.width
     val h = size.height
-    val corner = h * 0.16f
-    val tab = h * 0.14f
-    val socketStart = w * 0.20f
-    val socketEnd = w * 0.36f
+    val corner = h * 0.12f
+    val depth = h * 0.14f
+    val notchStart = w * 0.135f
+    val notchEnd = w * 0.258f
+    val bottom = h - depth
 
     moveTo(corner, 0f)
-    lineTo(socketStart, 0f)
-    cubicTo(socketStart + tab, 0f, socketStart + tab, tab, socketStart + tab * 2f, tab)
-    cubicTo(socketEnd - tab, tab, socketEnd - tab, 0f, socketEnd, 0f)
+    lineTo(notchStart, 0f)
+    quadraticTo(notchStart + depth * 0.35f, 0f, notchStart + depth * 0.55f, depth)
+    lineTo(notchEnd - depth * 0.55f, depth)
+    quadraticTo(notchEnd - depth * 0.35f, 0f, notchEnd, 0f)
     lineTo(w - corner, 0f)
-    quadraticBezierTo(w, 0f, w, corner)
-    lineTo(w, h - tab - corner)
-    quadraticBezierTo(w, h - tab, w - corner, h - tab)
-    lineTo(socketEnd, h - tab)
-    cubicTo(socketEnd - tab, h - tab, socketEnd - tab, h, socketEnd - tab * 2f, h)
-    cubicTo(socketStart + tab, h, socketStart + tab, h - tab, socketStart, h - tab)
-    lineTo(corner, h - tab)
-    quadraticBezierTo(0f, h - tab, 0f, h - tab - corner)
+    quadraticTo(w, 0f, w, corner)
+    lineTo(w, bottom - corner)
+    quadraticTo(w, bottom, w - corner, bottom)
+    lineTo(notchEnd, bottom)
+    quadraticTo(notchEnd - depth * 0.35f, bottom, notchEnd - depth * 0.55f, h)
+    lineTo(notchStart + depth * 0.55f, h)
+    quadraticTo(notchStart + depth * 0.35f, bottom, notchStart, bottom)
+    lineTo(corner, bottom)
+    quadraticTo(0f, bottom, 0f, bottom - corner)
     lineTo(0f, corner)
-    quadraticBezierTo(0f, 0f, corner, 0f)
+    quadraticTo(0f, 0f, corner, 0f)
     close()
 }
 
-private val ValueShape = GenericShape { size, _ ->
-    val point = size.height * 0.34f
-    moveTo(point, 0f)
-    lineTo(size.width - point, 0f)
-    quadraticBezierTo(size.width, 0f, size.width, size.height / 2f)
-    quadraticBezierTo(size.width, size.height, size.width - point, size.height)
-    lineTo(point, size.height)
-    quadraticBezierTo(0f, size.height, 0f, size.height / 2f)
-    quadraticBezierTo(0f, 0f, point, 0f)
+/** Number values are capsules. Boolean values will use a hexagon later. */
+private val NumberValueShape = GenericShape { size, _ ->
+    val r = size.height / 2f
+    moveTo(r, 0f)
+    lineTo(size.width - r, 0f)
+    quadraticTo(size.width, 0f, size.width, r)
+    quadraticTo(size.width, size.height, size.width - r, size.height)
+    lineTo(r, size.height)
+    quadraticTo(0f, size.height, 0f, r)
+    quadraticTo(0f, 0f, r, 0f)
     close()
 }
 
+/**
+ * C-shaped statement container. The statement-input tab at the header edge is
+ * aligned with the previous socket of the first child block.
+ */
 private val ContainerShape = GenericShape { size, _ ->
     val w = size.width
     val h = size.height
-    val tab = w * 0.028f
-    val corner = w * 0.035f
-    val socketStart = w * 0.20f
-    val socketEnd = w * 0.34f
-    val header = minOf(h * 0.44f, w * 0.205f)
-    val footer = w * 0.08f
-    val rail = w * 0.105f
+    val corner = w * 0.025f
+    val depth = w * 0.026f
+    val outerNotchStart = w * 0.11f
+    val outerNotchEnd = w * 0.21f
+    val rail = w * 0.112f
+    val header = w * 0.178f
+    val footer = w * 0.059f
+    val bodyBottom = h - footer
+    val outerBottom = h - depth
+    val statementTabStart = rail + w * 0.115f
+    val statementTabEnd = rail + w * 0.215f
 
     moveTo(corner, 0f)
-    lineTo(socketStart, 0f)
-    cubicTo(socketStart + tab, 0f, socketStart + tab, tab, socketStart + tab * 2f, tab)
-    cubicTo(socketEnd - tab, tab, socketEnd - tab, 0f, socketEnd, 0f)
+    lineTo(outerNotchStart, 0f)
+    quadraticTo(outerNotchStart + depth * 0.35f, 0f, outerNotchStart + depth * 0.55f, depth)
+    lineTo(outerNotchEnd - depth * 0.55f, depth)
+    quadraticTo(outerNotchEnd - depth * 0.35f, 0f, outerNotchEnd, 0f)
     lineTo(w - corner, 0f)
-    quadraticBezierTo(w, 0f, w, corner)
+    quadraticTo(w, 0f, w, corner)
     lineTo(w, header - corner)
-    quadraticBezierTo(w, header, w - corner, header)
+    quadraticTo(w, header, w - corner, header)
+
+    // Statement-input tab points down into the first child's top socket.
+    lineTo(statementTabEnd, header)
+    quadraticTo(statementTabEnd - depth * 0.35f, header, statementTabEnd - depth * 0.55f, header + depth)
+    lineTo(statementTabStart + depth * 0.55f, header + depth)
+    quadraticTo(statementTabStart + depth * 0.35f, header, statementTabStart, header)
     lineTo(rail, header)
-    lineTo(rail, h - footer)
-    lineTo(w - corner, h - footer)
-    quadraticBezierTo(w, h - footer, w, h - footer + corner)
-    lineTo(w, h - tab - corner)
-    quadraticBezierTo(w, h - tab, w - corner, h - tab)
-    lineTo(socketEnd, h - tab)
-    cubicTo(socketEnd - tab, h - tab, socketEnd - tab, h, socketEnd - tab * 2f, h)
-    cubicTo(socketStart + tab, h, socketStart + tab, h - tab, socketStart, h - tab)
-    lineTo(corner, h - tab)
-    quadraticBezierTo(0f, h - tab, 0f, h - tab - corner)
+    lineTo(rail, bodyBottom)
+
+    lineTo(w - corner, bodyBottom)
+    quadraticTo(w, bodyBottom, w, bodyBottom + corner)
+    lineTo(w, outerBottom - corner)
+    quadraticTo(w, outerBottom, w - corner, outerBottom)
+    lineTo(outerNotchEnd, outerBottom)
+    quadraticTo(outerNotchEnd - depth * 0.35f, outerBottom, outerNotchEnd - depth * 0.55f, h)
+    lineTo(outerNotchStart + depth * 0.55f, h)
+    quadraticTo(outerNotchStart + depth * 0.35f, outerBottom, outerNotchStart, outerBottom)
+    lineTo(corner, outerBottom)
+    quadraticTo(0f, outerBottom, 0f, outerBottom - corner)
     lineTo(0f, corner)
-    quadraticBezierTo(0f, 0f, corner, 0f)
+    quadraticTo(0f, 0f, corner, 0f)
     close()
 }
 
@@ -182,6 +212,7 @@ fun BlockWorkspace(
                             block = block,
                             allBlocks = blocks,
                             hasError = block.id in errorBlockIds,
+                            zoom = zoom,
                             onMoveStart = onMoveStart,
                             onMove = onMove,
                             onMoveFinished = onMoveFinished,
@@ -192,12 +223,14 @@ fun BlockWorkspace(
             }
         }
 
+        // Bottom-start is intentionally reserved for workspace controls. The
+        // "Blöcke" FAB stays bottom-end, so both can always be touched.
         ZoomControls(
             zoom = zoom,
             onZoomOut = { zoom = (zoom - 0.10f).coerceAtLeast(0.50f) },
             onZoomIn = { zoom = (zoom + 0.10f).coerceAtMost(1.30f) },
             onReset = { zoom = 0.78f },
-            modifier = Modifier.align(Alignment.BottomEnd).padding(14.dp)
+            modifier = Modifier.align(Alignment.BottomStart).padding(14.dp)
         )
     }
 }
@@ -254,6 +287,7 @@ private fun NativeProgramBlock(
     block: ProgramBlock,
     allBlocks: List<ProgramBlock>,
     hasError: Boolean,
+    zoom: Float,
     onMoveStart: (id: String) -> Unit,
     onMove: (id: String, deltaXDp: Float, deltaYDp: Float) -> Unit,
     onMoveFinished: (id: String) -> Unit,
@@ -262,13 +296,16 @@ private fun NativeProgramBlock(
     val density = LocalDensity.current.density
     val heightDp = blockHeightDp(block, allBlocks).dp
     val widthDp = when (block.type.role) {
-        BlockRole.COMMAND -> CommandWidth
-        BlockRole.VALUE -> ValueWidth
-        BlockRole.CONTAINER -> ContainerWidth
+        BlockRole.COMMAND -> CommandWidthDp.dp
+        BlockRole.VALUE -> ValueWidthDp.dp
+        BlockRole.CONTAINER -> ContainerWidthDp.dp
     }
     val shape = when (block.type.role) {
         BlockRole.COMMAND -> StatementShape
-        BlockRole.VALUE -> ValueShape
+        BlockRole.VALUE -> when (block.type.outputType) {
+            ValueType.BOOLEAN -> NumberValueShape // reserved until the Boolean hexagon is introduced
+            else -> NumberValueShape
+        }
         BlockRole.CONTAINER -> ContainerShape
     }
     val childCount = directChildren(allBlocks, block.id).size
@@ -280,14 +317,14 @@ private fun NativeProgramBlock(
             }
             .width(widthDp)
             .height(heightDp)
-            .pointerInput(block.id) {
+            .pointerInput(block.id, zoom) {
                 detectDragGestures(
                     onDragStart = { onMoveStart(block.id) },
                     onDragEnd = { onMoveFinished(block.id) },
                     onDragCancel = { onMoveFinished(block.id) }
                 ) { change, dragAmount ->
                     change.consume()
-                    onMove(block.id, dragAmount.x / density, dragAmount.y / density)
+                    onMove(block.id, dragAmount.x / (density * zoom), dragAmount.y / (density * zoom))
                 }
             }
             .clickable(onClick = onEdit)
@@ -298,76 +335,57 @@ private fun NativeProgramBlock(
                 .then(if (hasError) Modifier.border(3.dp, MaterialTheme.colorScheme.error, shape) else Modifier),
             shape = shape,
             color = blockColor(block.type),
-            shadowElevation = 4.dp
+            shadowElevation = 3.dp
         ) {
             when (block.type.role) {
-                BlockRole.CONTAINER -> ContainerHeader(block, childCount)
-                else -> CompactBlockContent(block)
+                BlockRole.CONTAINER -> ContainerHeader(block, allBlocks)
+                BlockRole.VALUE -> ValueBlockContent(block)
+                BlockRole.COMMAND -> CommandBlockContent(block, allBlocks)
             }
         }
 
         if (block.type.role == BlockRole.CONTAINER && childCount == 0) {
             Text(
                 text = "Befehle hier einrasten",
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
-                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.78f),
+                fontSize = 11.sp,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier
-                    .offset(x = 46.dp, y = 72.dp)
-                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.88f), RoundedCornerShape(10.dp))
-                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                    .offset(x = 54.dp, y = (ContainerHeaderDp + 16f).dp)
+                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.90f), RoundedCornerShape(9.dp))
+                    .padding(horizontal = 9.dp, vertical = 5.dp)
             )
         }
     }
 }
 
 @Composable
-private fun CompactBlockContent(block: ProgramBlock) {
-    Row(
-        modifier = Modifier.fillMaxSize().padding(start = 13.dp, end = 12.dp, top = 8.dp, bottom = 14.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = if (block.type.role == BlockRole.VALUE) "#" else "▶",
-            color = Color.White.copy(alpha = 0.82f),
-            fontWeight = FontWeight.Black,
-            modifier = Modifier.padding(end = 7.dp)
-        )
-        Text(
-            text = block.type.title,
-            color = Color.White,
-            fontWeight = FontWeight.Bold,
-            fontSize = 14.sp,
-            maxLines = 1,
-            modifier = Modifier.weight(1f)
-        )
-        Spacer(Modifier.width(7.dp))
-        Surface(shape = RoundedCornerShape(9.dp), color = Color.White.copy(alpha = 0.20f)) {
+private fun CommandBlockContent(block: ProgramBlock, blocks: List<ProgramBlock>) {
+    if (block.type == BlockType.DELAY) {
+        Box(Modifier.fillMaxSize()) {
             Text(
-                text = blockValueLabel(block),
+                "Warten",
                 color = Color.White,
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 12.sp,
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp,
+                modifier = Modifier.offset(x = 16.dp, y = 17.dp)
+            )
+            ValueSocket(
+                fallback = "${block.primary} ms",
+                connected = connectedValue(blocks, block.id, "duration") != null,
+                modifier = Modifier.offset(x = 128.dp, y = 7.dp)
             )
         }
+        return
     }
-}
 
-@Composable
-private fun ContainerHeader(block: ProgramBlock, childCount: Int) {
     Row(
-        modifier = Modifier.width(ContainerWidth).height(56.dp).padding(horizontal = 13.dp, vertical = 8.dp),
+        modifier = Modifier.fillMaxSize().padding(start = 16.dp, end = 12.dp, top = 7.dp, bottom = 15.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text("↳", color = Color.White.copy(alpha = 0.85f), fontWeight = FontWeight.Black, modifier = Modifier.padding(end = 7.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(block.type.title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-            if (childCount > 0) {
-                Text("$childCount ${if (childCount == 1) "Befehl" else "Befehle"}", color = Color.White.copy(alpha = 0.76f), fontSize = 10.sp)
-            }
-        }
-        Surface(shape = RoundedCornerShape(9.dp), color = Color.White.copy(alpha = 0.20f)) {
+        Text(block.type.title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp, maxLines = 1, modifier = Modifier.weight(1f))
+        Spacer(Modifier.width(7.dp))
+        Surface(shape = RoundedCornerShape(8.dp), color = Color.White.copy(alpha = 0.20f)) {
             Text(
                 blockValueLabel(block),
                 color = Color.White,
@@ -379,14 +397,86 @@ private fun ContainerHeader(block: ProgramBlock, childCount: Int) {
     }
 }
 
+@Composable
+private fun ValueBlockContent(block: ProgramBlock) {
+    Row(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center
+    ) {
+        Text(
+            text = when (block.type) {
+                BlockType.ANALOG_READ -> "Analog A${block.primary}"
+                else -> blockValueLabel(block)
+            },
+            color = Color.White,
+            fontWeight = FontWeight.Bold,
+            fontSize = 12.sp,
+            maxLines = 1
+        )
+    }
+}
+
+@Composable
+private fun ContainerHeader(block: ProgramBlock, blocks: List<ProgramBlock>) {
+    Box(modifier = Modifier.width(ContainerWidthDp.dp).height(ContainerHeaderDp.dp)) {
+        when (block.type) {
+            BlockType.REPEAT -> {
+                Text("Wiederhole", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp, modifier = Modifier.offset(x = 16.dp, y = 17.dp))
+                ValueSocket(
+                    fallback = block.primary.toString(),
+                    connected = connectedValue(blocks, block.id, "count") != null,
+                    modifier = Modifier.offset(x = 150.dp, y = 6.dp)
+                )
+                Text("mal", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp, modifier = Modifier.offset(x = 267.dp, y = 18.dp))
+            }
+            else -> {
+                Text(block.type.title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp, modifier = Modifier.offset(x = 16.dp, y = 17.dp))
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color.White.copy(alpha = 0.20f),
+                    modifier = Modifier.offset(x = 154.dp, y = 8.dp)
+                ) {
+                    Text(
+                        blockValueLabel(block),
+                        color = Color.White,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 11.sp,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ValueSocket(fallback: String, connected: Boolean, modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier
+            .width(ValueWidthDp.dp)
+            .height(42.dp)
+            .border(1.dp, Color.White.copy(alpha = 0.38f), NumberValueShape),
+        shape = NumberValueShape,
+        color = Color.Black.copy(alpha = 0.18f)
+    ) {
+        if (!connected) {
+            Box(contentAlignment = Alignment.Center) {
+                Text(fallback, color = Color.White.copy(alpha = 0.92f), fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+            }
+        }
+    }
+}
+
 private fun nestingDepth(block: ProgramBlock, blocks: List<ProgramBlock>): Int {
     val byId = blocks.associateBy { it.id }
     var depth = 0
-    var current = block.parentId
+    var current = block.valueOwnerId ?: block.parentId
     val seen = mutableSetOf<String>()
     while (current != null && seen.add(current)) {
         depth++
-        current = byId[current]?.parentId
+        val parent = byId[current]
+        current = parent?.valueOwnerId ?: parent?.parentId
     }
     return depth
 }

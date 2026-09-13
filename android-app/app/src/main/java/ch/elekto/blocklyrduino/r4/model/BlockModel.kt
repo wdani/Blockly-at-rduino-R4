@@ -11,9 +11,21 @@ enum class BlockCategory(val title: String) {
 
 enum class BlockRole(val title: String, val explanation: String) {
     COMMAND("Befehl", "Wird von oben nach unten ausgeführt und kann mit anderen Befehlen verbunden werden."),
-    VALUE("Wert", "Liefert einen Wert. Wertblöcke passen später nur in passende Werteingänge."),
+    VALUE("Wert", "Liefert einen Wert und passt nur in einen Werteingang mit passendem Datentyp."),
     CONTAINER("Steuerung", "Umschließt andere Befehle und bestimmt, wann oder wie oft sie ausgeführt werden.")
 }
+
+enum class ValueType(val title: String) {
+    NUMBER("Zahl"),
+    BOOLEAN("Wahr/Falsch"),
+    TEXT("Text")
+}
+
+data class ValueInputSpec(
+    val key: String,
+    val label: String,
+    val acceptedType: ValueType
+)
 
 enum class BlockType(
     val title: String,
@@ -22,14 +34,17 @@ enum class BlockType(
     val role: BlockRole,
     val defaultPrimary: Int,
     val defaultSecondary: Int = 0,
-    val defaultFlag: Boolean = true
+    val defaultFlag: Boolean = true,
+    val outputType: ValueType? = null,
+    val valueInputs: List<ValueInputSpec> = emptyList()
 ) {
     DELAY(
         title = "Warten",
         subtitle = "Pausiert den Ablauf für eine bestimmte Zeit.",
         category = BlockCategory.GRUNDLAGEN,
         role = BlockRole.COMMAND,
-        defaultPrimary = 1000
+        defaultPrimary = 1000,
+        valueInputs = listOf(ValueInputSpec("duration", "Wartezeit", ValueType.NUMBER))
     ),
     DIGITAL_WRITE(
         title = "Digitaler Ausgang",
@@ -52,14 +67,16 @@ enum class BlockType(
         subtitle = "Liest A0 bis A5 und liefert daraus einen Zahlenwert.",
         category = BlockCategory.WERTE,
         role = BlockRole.VALUE,
-        defaultPrimary = 0
+        defaultPrimary = 0,
+        outputType = ValueType.NUMBER
     ),
     REPEAT(
         title = "Wiederholen",
         subtitle = "Führt die eingerasteten Befehle mehrfach aus.",
         category = BlockCategory.LOGIK,
         role = BlockRole.CONTAINER,
-        defaultPrimary = 10
+        defaultPrimary = 10,
+        valueInputs = listOf(ValueInputSpec("count", "Anzahl", ValueType.NUMBER))
     ),
     IF_DIGITAL(
         title = "Wenn Eingang",
@@ -81,20 +98,37 @@ data class ProgramBlock(
     val flag: Boolean = type.defaultFlag,
     val parentId: String? = null,
     val childOrder: Int = 0,
-    val previousId: String? = null
+    val previousId: String? = null,
+    val valueOwnerId: String? = null,
+    val valueInputKey: String? = null
 )
 
-const val StatementHeightDp = 58f
-const val ValueHeightDp = 48f
+const val StatementHeightDp = 56f
+const val ValueHeightDp = 42f
 const val ConnectorOverlapDp = 8f
-const val ContainerHeaderDp = 58f
-const val ContainerFooterDp = 22f
-const val ContainerInnerPaddingDp = 8f
-const val ContainerIndentDp = 30f
+const val ContainerHeaderDp = 54f
+const val ContainerFooterDp = 18f
+const val ContainerEmptyBodyDp = 54f
+const val ContainerIndentDp = 34f
+const val CommandWidthDp = 248f
+const val ValueWidthDp = 112f
+const val ContainerWidthDp = 304f
 
 fun directChildren(blocks: List<ProgramBlock>, parentId: String): List<ProgramBlock> =
     blocks.filter { it.parentId == parentId }
         .sortedWith(compareBy<ProgramBlock> { it.childOrder }.thenBy { it.yDp })
+
+fun connectedValue(blocks: List<ProgramBlock>, ownerId: String, inputKey: String): ProgramBlock? =
+    blocks.firstOrNull { it.valueOwnerId == ownerId && it.valueInputKey == inputKey }
+
+fun valueInputSpec(owner: ProgramBlock, inputKey: String): ValueInputSpec? =
+    owner.type.valueInputs.firstOrNull { it.key == inputKey }
+
+fun valueSocketOffset(owner: ProgramBlock, inputKey: String): Pair<Float, Float> = when (owner.type) {
+    BlockType.DELAY -> 128f to 7f
+    BlockType.REPEAT -> 150f to 6f
+    else -> 128f to 7f
+}
 
 fun blockHeightDp(block: ProgramBlock, blocks: List<ProgramBlock>, visited: Set<String> = emptySet()): Float {
     if (block.id in visited) return StatementHeightDp
@@ -103,15 +137,15 @@ fun blockHeightDp(block: ProgramBlock, blocks: List<ProgramBlock>, visited: Set<
         BlockRole.VALUE -> ValueHeightDp
         BlockRole.CONTAINER -> {
             val children = directChildren(blocks, block.id)
-            if (children.isEmpty()) {
-                118f
+            val bodyHeight = if (children.isEmpty()) {
+                ContainerEmptyBodyDp
             } else {
-                val childHeight = children.mapIndexed { index, child ->
+                children.mapIndexed { index, child ->
                     val height = blockHeightDp(child, blocks, visited + block.id)
                     if (index == children.lastIndex) height else height - ConnectorOverlapDp
                 }.sum()
-                maxOf(118f, ContainerHeaderDp + ContainerInnerPaddingDp + childHeight + ContainerFooterDp)
             }
+            ContainerHeaderDp + bodyHeight + ContainerFooterDp
         }
     }
 }
@@ -119,9 +153,10 @@ fun blockHeightDp(block: ProgramBlock, blocks: List<ProgramBlock>, visited: Set<
 fun linkedDescendantIds(blocks: List<ProgramBlock>, blockId: String): Set<String> {
     val result = linkedSetOf<String>()
     fun collect(id: String) {
-        val nested = blocks.filter { it.parentId == id }
-        val followers = blocks.filter { it.previousId == id && it.parentId == null }
-        (nested + followers).forEach { child ->
+        val nestedStatements = blocks.filter { it.parentId == id }
+        val followers = blocks.filter { it.previousId == id && it.parentId == null && it.valueOwnerId == null }
+        val valueChildren = blocks.filter { it.valueOwnerId == id }
+        (nestedStatements + followers + valueChildren).forEach { child ->
             if (result.add(child.id)) collect(child.id)
         }
     }
@@ -135,7 +170,9 @@ fun chainFrom(blocks: List<ProgramBlock>, firstId: String): List<ProgramBlock> {
     var current = blocks.firstOrNull { it.id == firstId }
     while (current != null && seen.add(current.id)) {
         result += current
-        current = blocks.firstOrNull { it.previousId == current.id && it.parentId == null }
+        current = blocks.firstOrNull {
+            it.previousId == current.id && it.parentId == null && it.valueOwnerId == null
+        }
     }
     return result
 }
@@ -145,14 +182,17 @@ fun normalizeProjectLayout(source: List<ProgramBlock>): List<ProgramBlock> {
 
     fun currentList(): List<ProgramBlock> = source.mapNotNull { map[it.id] }
 
-    val heads = source.filter { it.parentId == null && it.previousId == null }
-        .sortedWith(compareBy<ProgramBlock> { it.yDp }.thenBy { it.xDp })
+    val heads = source.filter {
+        it.parentId == null && it.valueOwnerId == null && it.previousId == null && it.type.role != BlockRole.VALUE
+    }.sortedWith(compareBy<ProgramBlock> { it.yDp }.thenBy { it.xDp })
 
     heads.forEach { head ->
         var current = map[head.id] ?: return@forEach
         val seen = mutableSetOf<String>()
         while (seen.add(current.id)) {
-            val follower = currentList().firstOrNull { it.parentId == null && it.previousId == current.id } ?: break
+            val follower = currentList().firstOrNull {
+                it.parentId == null && it.valueOwnerId == null && it.previousId == current.id
+            } ?: break
             val updated = follower.copy(
                 xDp = current.xDp,
                 yDp = current.yDp + blockHeightDp(current, currentList()) - ConnectorOverlapDp
@@ -174,7 +214,9 @@ fun normalizeProjectLayout(source: List<ProgramBlock>): List<ProgramBlock> {
                 xDp = parent.xDp + ContainerIndentDp,
                 yDp = nextY,
                 childOrder = index,
-                previousId = null
+                previousId = null,
+                valueOwnerId = null,
+                valueInputKey = null
             )
             map[child.id] = updated
             layoutChildren(child.id, ancestry + parentId)
@@ -186,13 +228,28 @@ fun normalizeProjectLayout(source: List<ProgramBlock>): List<ProgramBlock> {
         layoutChildren(container.id, emptySet())
     }
 
+    currentList().filter { it.valueOwnerId != null }.forEach { value ->
+        val owner = value.valueOwnerId?.let(map::get)
+        val key = value.valueInputKey
+        if (owner != null && key != null) {
+            val (dx, dy) = valueSocketOffset(owner, key)
+            map[value.id] = value.copy(
+                xDp = owner.xDp + dx,
+                yDp = owner.yDp + dy,
+                parentId = null,
+                previousId = null,
+                childOrder = 0
+            )
+        }
+    }
+
     return source.mapNotNull { map[it.id] }
 }
 
 fun defaultBlinkProject(): List<ProgramBlock> {
     val high = ProgramBlock(type = BlockType.DIGITAL_WRITE, xDp = 32f, yDp = 40f, primary = 13, flag = true)
-    val waitHigh = ProgramBlock(type = BlockType.DELAY, xDp = 32f, yDp = 90f, primary = 1000, previousId = high.id)
-    val low = ProgramBlock(type = BlockType.DIGITAL_WRITE, xDp = 32f, yDp = 140f, primary = 13, flag = false, previousId = waitHigh.id)
-    val waitLow = ProgramBlock(type = BlockType.DELAY, xDp = 32f, yDp = 190f, primary = 1000, previousId = low.id)
+    val waitHigh = ProgramBlock(type = BlockType.DELAY, xDp = 32f, yDp = 88f, primary = 1000, previousId = high.id)
+    val low = ProgramBlock(type = BlockType.DIGITAL_WRITE, xDp = 32f, yDp = 136f, primary = 13, flag = false, previousId = waitHigh.id)
+    val waitLow = ProgramBlock(type = BlockType.DELAY, xDp = 32f, yDp = 184f, primary = 1000, previousId = low.id)
     return normalizeProjectLayout(listOf(high, waitHigh, low, waitLow))
 }

@@ -3,7 +3,10 @@ package ch.elekto.blocklyrduino.r4.engine
 import ch.elekto.blocklyrduino.r4.model.BlockRole
 import ch.elekto.blocklyrduino.r4.model.BlockType
 import ch.elekto.blocklyrduino.r4.model.ProgramBlock
+import ch.elekto.blocklyrduino.r4.model.ValueType
+import ch.elekto.blocklyrduino.r4.model.connectedValue
 import ch.elekto.blocklyrduino.r4.model.directChildren
+import ch.elekto.blocklyrduino.r4.model.valueInputSpec
 
 enum class IssueLevel { INFO, WARNING, ERROR }
 
@@ -22,6 +25,16 @@ object ProgramValidator {
         val outputPins = mutableSetOf<Int>()
         val inputPins = mutableSetOf<Int>()
 
+        blocks.groupBy { it.valueOwnerId to it.valueInputKey }
+            .filterKeys { (owner, key) -> owner != null && key != null }
+            .filterValues { it.size > 1 }
+            .values
+            .forEach { duplicates ->
+                duplicates.forEach {
+                    issues += ValidationIssue(IssueLevel.ERROR, "In diesem Werteingang stecken mehrere Blöcke gleichzeitig.", it.id)
+                }
+            }
+
         blocks.forEach { block ->
             block.parentId?.let { parentId ->
                 val parent = byId[parentId]
@@ -36,8 +49,24 @@ object ProgramValidator {
                 val previous = byId[previousId]
                 if (previous == null) {
                     issues += ValidationIssue(IssueLevel.ERROR, "Die Verbindung zum vorherigen Block ist beschädigt.", block.id)
-                } else if (block.parentId != null || block.type.role == BlockRole.VALUE || previous.type.role == BlockRole.VALUE) {
+                } else if (block.parentId != null || block.valueOwnerId != null || block.type.role == BlockRole.VALUE || previous.type.role == BlockRole.VALUE) {
                     issues += ValidationIssue(IssueLevel.ERROR, "Diese Blocktypen können nicht als Befehlsfolge zusammengesteckt werden.", block.id)
+                }
+            }
+
+            block.valueOwnerId?.let { ownerId ->
+                val owner = byId[ownerId]
+                val key = block.valueInputKey
+                val spec = if (owner != null && key != null) valueInputSpec(owner, key) else null
+                when {
+                    owner == null -> issues += ValidationIssue(IssueLevel.ERROR, "Dieser Wert verweist auf einen nicht mehr vorhandenen Block.", block.id)
+                    key == null || spec == null -> issues += ValidationIssue(IssueLevel.ERROR, "Der Werteingang dieses Blocks ist nicht mehr gültig.", block.id)
+                    block.type.role != BlockRole.VALUE -> issues += ValidationIssue(IssueLevel.ERROR, "Nur Wertblöcke dürfen in einen Werteingang gesteckt werden.", block.id)
+                    block.type.outputType != spec.acceptedType -> issues += ValidationIssue(
+                        IssueLevel.ERROR,
+                        "Dieser Eingang erwartet ${spec.acceptedType.title}, der eingesteckte Block liefert ${block.type.outputType?.title ?: "keinen Wert"}.",
+                        block.id
+                    )
                 }
             }
 
@@ -68,12 +97,12 @@ object ProgramValidator {
                     }
                 }
                 BlockType.DELAY -> {
-                    if (block.primary !in 0..600_000) {
+                    if (connectedValue(blocks, block.id, "duration") == null && block.primary !in 0..600_000) {
                         issues += ValidationIssue(IssueLevel.ERROR, "Die Wartezeit muss zwischen 0 und 600000 ms liegen.", block.id)
                     }
                 }
                 BlockType.REPEAT -> {
-                    if (block.primary !in 1..1000) {
+                    if (connectedValue(blocks, block.id, "count") == null && block.primary !in 1..1000) {
                         issues += ValidationIssue(IssueLevel.ERROR, "Die Wiederholungszahl muss zwischen 1 und 1000 liegen.", block.id)
                     }
                     if (directChildren(blocks, block.id).isEmpty()) {
@@ -93,12 +122,11 @@ object ProgramValidator {
             }
         }
 
-        // Detect parent/sequence cycles defensively so a damaged project cannot recurse forever.
         blocks.forEach { start ->
             val seen = mutableSetOf<String>()
             var current: ProgramBlock? = start
             while (current != null && seen.add(current.id)) {
-                val nextId = current.parentId ?: current.previousId
+                val nextId = current.valueOwnerId ?: current.parentId ?: current.previousId
                 current = nextId?.let(byId::get)
             }
             if (current != null) {
@@ -131,8 +159,19 @@ object ArduinoCodeGenerator {
             .filter { it in 0..13 }
             .distinct()
 
+        fun numberExpression(owner: ProgramBlock, inputKey: String, fallback: Int): String {
+            val value = connectedValue(blocks, owner.id, inputKey) ?: return fallback.toString()
+            return when (value.type) {
+                BlockType.ANALOG_READ -> "analogRead(A${value.primary.coerceIn(0, 5)})"
+                else -> fallback.toString()
+            }
+        }
+
         fun roots(): List<ProgramBlock> = blocks
-            .filter { it.parentId == null && (it.previousId == null || byId[it.previousId] == null) }
+            .filter {
+                it.parentId == null && it.valueOwnerId == null &&
+                    (it.previousId == null || byId[it.previousId] == null)
+            }
             .sortedWith(compareBy<ProgramBlock> { it.yDp }.thenBy { it.xDp })
 
         return buildString {
@@ -155,14 +194,17 @@ object ArduinoCodeGenerator {
                     BlockType.PWM_WRITE ->
                         appendLine("${indent}analogWrite(${block.primary}, ${block.secondary.coerceIn(0, 255)});")
                     BlockType.ANALOG_READ -> {
-                        val suffix = block.id.replace("-", "").take(6)
-                        appendLine("${indent}int analog_$suffix = analogRead(A${block.primary.coerceIn(0, 5)});")
+                        if (block.valueOwnerId == null) {
+                            val suffix = block.id.replace("-", "").take(6)
+                            appendLine("${indent}int analog_$suffix = analogRead(A${block.primary.coerceIn(0, 5)});")
+                        }
                     }
                     BlockType.DELAY ->
-                        appendLine("${indent}delay(${block.primary.coerceAtLeast(0)});")
+                        appendLine("${indent}delay(${numberExpression(block, "duration", block.primary.coerceAtLeast(0))});")
                     BlockType.REPEAT -> {
                         val suffix = block.id.replace("-", "").take(4)
-                        appendLine("${indent}for (int i_$suffix = 0; i_$suffix < ${block.primary.coerceAtLeast(1)}; i_$suffix++) {")
+                        val count = numberExpression(block, "count", block.primary.coerceAtLeast(1))
+                        appendLine("${indent}for (int i_$suffix = 0; i_$suffix < ($count); i_$suffix++) {")
                         directChildren(blocks, block.id).forEach { emitBlock(it, "$indent  ") }
                         appendLine("${indent}}")
                     }
@@ -180,14 +222,15 @@ object ArduinoCodeGenerator {
                 while (current != null && chainSeen.add(current.id)) {
                     emitBlock(current, "  ")
                     current = blocks.firstOrNull {
-                        it.parentId == null && it.previousId == current!!.id
+                        it.parentId == null && it.valueOwnerId == null && it.previousId == current!!.id
                     }
                 }
             }
 
             roots().forEach(::emitChain)
-            // Damaged/orphaned blocks are still emitted once so code view never silently loses content.
-            blocks.filter { it.id !in emitted }.sortedBy { it.yDp }.forEach { emitBlock(it, "  ") }
+            blocks.filter { it.id !in emitted && it.valueOwnerId == null }
+                .sortedBy { it.yDp }
+                .forEach { emitBlock(it, "  ") }
 
             appendLine("}")
         }

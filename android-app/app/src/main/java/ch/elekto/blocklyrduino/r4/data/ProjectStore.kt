@@ -31,7 +31,9 @@ class ProjectStore(context: Context) {
                             flag = item.optBoolean("flag", type.defaultFlag),
                             parentId = item.optString("parentId", "").takeIf { it.isNotBlank() },
                             childOrder = item.optInt("childOrder", 0),
-                            previousId = item.optString("previousId", "").takeIf { it.isNotBlank() }
+                            previousId = item.optString("previousId", "").takeIf { it.isNotBlank() },
+                            valueOwnerId = item.optString("valueOwnerId", "").takeIf { it.isNotBlank() },
+                            valueInputKey = item.optString("valueInputKey", "").takeIf { it.isNotBlank() }
                         )
                     )
                 }
@@ -54,13 +56,15 @@ class ProjectStore(context: Context) {
                     .put("parentId", block.parentId ?: "")
                     .put("childOrder", block.childOrder)
                     .put("previousId", block.previousId ?: "")
+                    .put("valueOwnerId", block.valueOwnerId ?: "")
+                    .put("valueInputKey", block.valueInputKey ?: "")
             )
         }
         prefs.edit().putString(KEY_BLOCKS, array.toString()).apply()
     }
 
     companion object {
-        // Keep the same key so Alpha 5 projects migrate in-place. New relation fields are optional.
+        // Same key keeps Alpha 5/6 projects. New fields are optional and migrate in place.
         private const val KEY_BLOCKS = "program_blocks_v1"
     }
 }

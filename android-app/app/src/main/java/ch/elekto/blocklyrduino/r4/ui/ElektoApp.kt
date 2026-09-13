@@ -72,13 +72,18 @@ import ch.elekto.blocklyrduino.r4.engine.ValidationIssue
 import ch.elekto.blocklyrduino.r4.model.BlockCategory
 import ch.elekto.blocklyrduino.r4.model.BlockRole
 import ch.elekto.blocklyrduino.r4.model.BlockType
+import ch.elekto.blocklyrduino.r4.model.CommandWidthDp
 import ch.elekto.blocklyrduino.r4.model.ConnectorOverlapDp
+import ch.elekto.blocklyrduino.r4.model.ContainerHeaderDp
+import ch.elekto.blocklyrduino.r4.model.ContainerWidthDp
 import ch.elekto.blocklyrduino.r4.model.ProgramBlock
+import ch.elekto.blocklyrduino.r4.model.ValueWidthDp
 import ch.elekto.blocklyrduino.r4.model.blockHeightDp
 import ch.elekto.blocklyrduino.r4.model.chainFrom
 import ch.elekto.blocklyrduino.r4.model.defaultBlinkProject
 import ch.elekto.blocklyrduino.r4.model.linkedDescendantIds
 import ch.elekto.blocklyrduino.r4.model.normalizeProjectLayout
+import ch.elekto.blocklyrduino.r4.model.valueSocketOffset
 import kotlin.math.abs
 import kotlin.math.round
 
@@ -119,7 +124,7 @@ fun ElektoApp() {
     }
 
     fun addBlock(type: BlockType) {
-        val loose = blocks.filter { it.parentId == null }
+        val loose = blocks.filter { it.parentId == null && it.valueOwnerId == null }
         val nextY = ((loose.maxOfOrNull { it.yDp + blockHeightDp(it, blocks) } ?: -20f) + 26f).coerceAtMost(1900f)
         blocks += ProgramBlock(type = type, xDp = 32f, yDp = nextY)
         persist()
@@ -137,8 +142,14 @@ fun ElektoApp() {
         val index = blocks.indexOfFirst { it.id == id }
         if (index < 0) return
         val current = blocks[index]
-        if (current.parentId != null || current.previousId != null) {
-            blocks[index] = current.copy(parentId = null, previousId = null, childOrder = 0)
+        if (current.parentId != null || current.previousId != null || current.valueOwnerId != null) {
+            blocks[index] = current.copy(
+                parentId = null,
+                previousId = null,
+                childOrder = 0,
+                valueOwnerId = null,
+                valueInputKey = null
+            )
             applyNormalized(save = false)
         }
     }
@@ -165,25 +176,86 @@ fun ElektoApp() {
             xDp = round(moving.xDp / 8f) * 8f,
             yDp = round(moving.yDp / 8f) * 8f,
             parentId = null,
-            previousId = null
+            previousId = null,
+            valueOwnerId = null,
+            valueInputKey = null
         )
         blocks[index] = moving
 
         val excluded = linkedDescendantIds(blocks.toList(), id) + id
-        val movingCenterX = moving.xDp + if (moving.type.role == BlockRole.CONTAINER) 143f else 110f
+
+        // Value blocks use typed sockets. A NUMBER output can only enter a
+        // NUMBER input. Shape and compatibility therefore describe the same rule.
+        if (moving.type.role == BlockRole.VALUE) {
+            val target = blocks
+                .filter { it.id !in excluded && it.type.valueInputs.isNotEmpty() }
+                .flatMap { owner ->
+                    owner.type.valueInputs.mapNotNull { spec ->
+                        if (moving.type.outputType != spec.acceptedType) return@mapNotNull null
+                        val (offsetX, offsetY) = valueSocketOffset(owner, spec.key)
+                        val snapX = owner.xDp + offsetX
+                        val snapY = owner.yDp + offsetY
+                        val dx = abs(moving.xDp - snapX)
+                        val dy = abs(moving.yDp - snapY)
+                        if (dx <= 86f && dy <= 44f) Triple(owner, spec, dx + dy) else null
+                    }
+                }
+                .minByOrNull { it.third }
+
+            if (target != null) {
+                val owner = target.first
+                val spec = target.second
+
+                // One value per input. If a socket is already occupied, move
+                // the old value next to its owner instead of silently deleting it.
+                val occupiedIndex = blocks.indexOfFirst {
+                    it.id != moving.id && it.valueOwnerId == owner.id && it.valueInputKey == spec.key
+                }
+                if (occupiedIndex >= 0) {
+                    val old = blocks[occupiedIndex]
+                    val outsideX = owner.xDp + if (owner.type.role == BlockRole.CONTAINER) ContainerWidthDp + 24f else CommandWidthDp + 24f
+                    blocks[occupiedIndex] = old.copy(
+                        valueOwnerId = null,
+                        valueInputKey = null,
+                        xDp = outsideX,
+                        yDp = owner.yDp
+                    )
+                }
+
+                index = blocks.indexOfFirst { it.id == moving.id }
+                if (index >= 0) {
+                    blocks[index] = blocks[index].copy(
+                        valueOwnerId = owner.id,
+                        valueInputKey = spec.key,
+                        parentId = null,
+                        previousId = null,
+                        childOrder = 0
+                    )
+                }
+                applyNormalized(save = true)
+                return
+            }
+
+            applyNormalized(save = true)
+            return
+        }
+
+        val movingCenterX = moving.xDp + when (moving.type.role) {
+            BlockRole.CONTAINER -> ContainerWidthDp / 2f
+            BlockRole.VALUE -> ValueWidthDp / 2f
+            BlockRole.COMMAND -> CommandWidthDp / 2f
+        }
         val movingCenterY = moving.yDp + blockHeightDp(moving, blocks) / 2f
 
-        // First preference: drop command/control blocks into the open body of a control block.
-        val containerTarget = if (moving.type.role != BlockRole.VALUE) {
-            blocks.filter {
-                it.id !in excluded && it.type.role == BlockRole.CONTAINER
-            }.filter { target ->
-                val targetHeight = blockHeightDp(target, blocks)
-                val zoneBottom = target.yDp + maxOf(targetHeight - 12f, 150f)
-                movingCenterX in (target.xDp + 20f)..(target.xDp + 302f) &&
-                    movingCenterY in (target.yDp + 48f)..zoneBottom
-            }.minByOrNull { abs(moving.yDp - (it.yDp + 58f)) }
-        } else null
+        // First preference for statement/control blocks: a statement input.
+        val containerTarget = blocks.filter {
+            it.id !in excluded && it.type.role == BlockRole.CONTAINER
+        }.filter { target ->
+            val targetHeight = blockHeightDp(target, blocks)
+            val zoneBottom = target.yDp + maxOf(targetHeight - 10f, 130f)
+            movingCenterX in (target.xDp + 18f)..(target.xDp + ContainerWidthDp) &&
+                movingCenterY in (target.yDp + ContainerHeaderDp - 8f)..zoneBottom
+        }.minByOrNull { abs(moving.yDp - (it.yDp + ContainerHeaderDp)) }
 
         if (containerTarget != null) {
             val chain = chainFrom(blocks.toList(), moving.id)
@@ -194,6 +266,8 @@ fun ElektoApp() {
                     blocks[itemIndex] = blocks[itemIndex].copy(
                         parentId = containerTarget.id,
                         previousId = null,
+                        valueOwnerId = null,
+                        valueInputKey = null,
                         childOrder = existing + orderOffset
                     )
                 }
@@ -202,35 +276,35 @@ fun ElektoApp() {
             return
         }
 
-        // Otherwise snap compatible statement/control blocks underneath another top-level block.
-        if (moving.type.role != BlockRole.VALUE) {
-            val target = blocks.filter {
-                it.id !in excluded && it.parentId == null && it.type.role != BlockRole.VALUE
-            }.map { candidate ->
-                val snapY = candidate.yDp + blockHeightDp(candidate, blocks) - ConnectorOverlapDp
-                Triple(candidate, abs(moving.xDp - candidate.xDp), abs(moving.yDp - snapY))
-            }.filter { (_, dx, dy) -> dx <= 74f && dy <= 34f }
-                .minByOrNull { (_, dx, dy) -> dx + dy }
-                ?.first
+        // Otherwise snap compatible statements underneath another top-level statement.
+        val statementTarget = blocks.filter {
+            it.id !in excluded && it.parentId == null && it.valueOwnerId == null && it.type.role != BlockRole.VALUE
+        }.map { candidate ->
+            val snapY = candidate.yDp + blockHeightDp(candidate, blocks) - ConnectorOverlapDp
+            Triple(candidate, abs(moving.xDp - candidate.xDp), abs(moving.yDp - snapY))
+        }.filter { (_, dx, dy) -> dx <= 74f && dy <= 34f }
+            .minByOrNull { (_, dx, dy) -> dx + dy }
+            ?.first
 
-            if (target != null) {
-                val chain = chainFrom(blocks.toList(), moving.id)
-                val tailId = chain.lastOrNull()?.id ?: moving.id
-                val oldFollowerIndex = blocks.indexOfFirst {
-                    it.parentId == null && it.previousId == target.id && it.id !in excluded
-                }
-                if (oldFollowerIndex >= 0) {
-                    blocks[oldFollowerIndex] = blocks[oldFollowerIndex].copy(previousId = tailId)
-                }
-                index = blocks.indexOfFirst { it.id == id }
-                if (index >= 0) {
-                    blocks[index] = blocks[index].copy(
-                        previousId = target.id,
-                        parentId = null,
-                        xDp = target.xDp,
-                        yDp = target.yDp + blockHeightDp(target, blocks) - ConnectorOverlapDp
-                    )
-                }
+        if (statementTarget != null) {
+            val chain = chainFrom(blocks.toList(), moving.id)
+            val tailId = chain.lastOrNull()?.id ?: moving.id
+            val oldFollowerIndex = blocks.indexOfFirst {
+                it.parentId == null && it.valueOwnerId == null && it.previousId == statementTarget.id && it.id !in excluded
+            }
+            if (oldFollowerIndex >= 0) {
+                blocks[oldFollowerIndex] = blocks[oldFollowerIndex].copy(previousId = tailId)
+            }
+            index = blocks.indexOfFirst { it.id == id }
+            if (index >= 0) {
+                blocks[index] = blocks[index].copy(
+                    previousId = statementTarget.id,
+                    parentId = null,
+                    valueOwnerId = null,
+                    valueInputKey = null,
+                    xDp = statementTarget.xDp,
+                    yDp = statementTarget.yDp + blockHeightDp(statementTarget, blocks) - ConnectorOverlapDp
+                )
             }
         }
 
@@ -245,6 +319,15 @@ fun ElektoApp() {
             when {
                 item.parentId == id -> blocks[index] = item.copy(parentId = null, childOrder = 0)
                 item.previousId == id -> blocks[index] = item.copy(previousId = previous)
+                item.valueOwnerId == id -> {
+                    val outsideX = block.xDp + if (block.type.role == BlockRole.CONTAINER) ContainerWidthDp + 24f else CommandWidthDp + 24f
+                    blocks[index] = item.copy(
+                        valueOwnerId = null,
+                        valueInputKey = null,
+                        xDp = outsideX,
+                        yDp = block.yDp
+                    )
+                }
             }
         }
         blocks.removeAll { it.id == id }
@@ -260,7 +343,7 @@ fun ElektoApp() {
                     Column {
                         Text("Elekto Blocks", fontWeight = FontWeight.SemiBold)
                         Text(
-                            "UNO R4 WiFi • Alpha 6 • lokal",
+                            "UNO R4 WiFi • Alpha 7 • lokal",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -388,7 +471,7 @@ private fun BlockPaletteSheet(onDismiss: () -> Unit, onAdd: (BlockType) -> Unit)
             Text("Blöcke auswählen", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(5.dp))
             Text(
-                "Die Form zeigt, wie ein Block verwendet wird. So wird die Struktur schon beim Anschauen verständlich.",
+                "Form = grammatische Rolle. Farbe = Funktionsgruppe. Nur passende Anschlüsse rasten zusammen.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(Modifier.height(10.dp))
@@ -400,8 +483,8 @@ private fun BlockPaletteSheet(onDismiss: () -> Unit, onAdd: (BlockType) -> Unit)
                             Text(role.title, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelLarge)
                             Text(
                                 when (role) {
-                                    BlockRole.COMMAND -> "steckt oben/unten"
-                                    BlockRole.VALUE -> "liefert einen Wert"
+                                    BlockRole.COMMAND -> "oben/unten stapelbar"
+                                    BlockRole.VALUE -> "passt in Werteingänge"
                                     BlockRole.CONTAINER -> "nimmt Befehle auf"
                                 },
                                 style = MaterialTheme.typography.labelSmall,
@@ -441,9 +524,9 @@ private fun BlockPaletteSheet(onDismiss: () -> Unit, onAdd: (BlockType) -> Unit)
                                 Box(contentAlignment = Alignment.Center) {
                                     Text(
                                         when (type.role) {
-                                            BlockRole.COMMAND -> "▶"
-                                            BlockRole.VALUE -> "#"
-                                            BlockRole.CONTAINER -> "↳"
+                                            BlockRole.COMMAND -> "↕"
+                                            BlockRole.VALUE -> "()"
+                                            BlockRole.CONTAINER -> "C"
                                         },
                                         color = androidx.compose.ui.graphics.Color.White,
                                         fontWeight = FontWeight.Black
@@ -506,8 +589,9 @@ private fun BlockEditorSheet(
 
             when (block.type) {
                 BlockType.DELAY -> {
-                    NumberEditor("Wartezeit (ms)", primaryText, { primaryText = it }, 0, 600_000)
+                    NumberEditor("Standard-Wartezeit (ms)", primaryText, { primaryText = it }, 0, 600_000)
                     QuickValues(listOf(100, 500, 1000, 2000)) { primaryText = it.toString() }
+                    Text("Der Standardwert wird benutzt, solange kein Zahlenwert in der runden Öffnung steckt.", style = MaterialTheme.typography.bodySmall)
                 }
                 BlockType.DIGITAL_WRITE -> {
                     NumberEditor("Digital-Pin D0–D13", primaryText, { primaryText = it }, 0, 13)
@@ -523,18 +607,18 @@ private fun BlockEditorSheet(
                 BlockType.ANALOG_READ -> {
                     NumberEditor("Analogeingang A0–A5", primaryText, { primaryText = it }, 0, 5)
                     QuickValues((0..5).toList()) { primaryText = it.toString() }
-                    Text("Dieser Wertblock bekommt in einer nächsten Ausbaustufe passende Werteingänge, zum Beispiel für Vergleiche und Variablen.", style = MaterialTheme.typography.bodySmall)
+                    Text("Dieser runde Zahlenblock kann in den runden Werteingang von „Warten“ oder „Wiederholen“ gezogen werden.", style = MaterialTheme.typography.bodySmall)
                 }
                 BlockType.REPEAT -> {
-                    NumberEditor("Anzahl Wiederholungen", primaryText, { primaryText = it }, 1, 1000)
+                    NumberEditor("Standard-Anzahl", primaryText, { primaryText = it }, 1, 1000)
                     QuickValues(listOf(2, 5, 10, 20)) { primaryText = it.toString() }
-                    Text("Ziehe Befehlsblöcke in die offene Mitte. Sie werden beim Loslassen eingerastet.", style = MaterialTheme.typography.bodySmall)
+                    Text("Die runde Öffnung nimmt Zahlenwerte auf. Befehle gehören in die C-förmige Mitte.", style = MaterialTheme.typography.bodySmall)
                 }
                 BlockType.IF_DIGITAL -> {
                     NumberEditor("Eingang D0–D13", primaryText, { primaryText = it }, 0, 13)
                     Text("Bedingung", style = MaterialTheme.typography.labelLarge)
                     HighLowSelector(flag = flag, onChange = { flag = it })
-                    Text("Ziehe Befehlsblöcke in die offene Mitte. Nur diese Befehle gehören dann zur Bedingung.", style = MaterialTheme.typography.bodySmall)
+                    Text("Befehle in der C-förmigen Mitte werden nur ausgeführt, wenn die Bedingung stimmt.", style = MaterialTheme.typography.bodySmall)
                 }
             }
 
