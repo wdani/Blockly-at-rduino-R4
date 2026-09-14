@@ -92,7 +92,8 @@ private fun ElektoRoot() {
 
 private class ElektoBridge(
     private val onCode: (String) -> Unit,
-    private val onDraggingChanged: (Boolean) -> Unit
+    private val onDraggingChanged: (Boolean) -> Unit,
+    private val onPreview: (String, String) -> Unit
 ) {
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -101,6 +102,10 @@ private class ElektoBridge(
 
     @JavascriptInterface
     fun setDragging(active: Boolean) = mainHandler.post { onDraggingChanged(active) }
+
+    @JavascriptInterface
+    fun setPreview(id: String, dataUrl: String) =
+        mainHandler.post { onPreview(id, dataUrl) }
 }
 
 private enum class BlockCategory(val title: String) {
@@ -170,6 +175,7 @@ private fun ElektoHybridApp(
     var generatedCode by remember { mutableStateOf<String?>(null) }
     var showBlocks by remember { mutableStateOf(false) }
     var isDraggingBlock by remember { mutableStateOf(false) }
+    var previewImages by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
 
     fun applyEditorTheme(view: WebView?) {
         val name = if (darkMode) "dark" else "light"
@@ -189,7 +195,7 @@ private fun ElektoHybridApp(
                     Column {
                         Text("Elekto Blocks", style = MaterialTheme.typography.titleMedium)
                         Text(
-                            "Hybrid 5 • Blockly-Engine",
+                            "Hybrid 6 • Blockly-Engine",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -266,7 +272,10 @@ private fun ElektoHybridApp(
                         addJavascriptInterface(
                             ElektoBridge(
                                 onCode = { generatedCode = it },
-                                onDraggingChanged = { isDraggingBlock = it }
+                                onDraggingChanged = { isDraggingBlock = it },
+                                onPreview = { id, data ->
+                                    previewImages = previewImages + (id to data)
+                                }
                             ),
                             "ElektoAndroid"
                         )
@@ -321,6 +330,7 @@ private fun ElektoHybridApp(
         BlockCatalogSheet(
             darkMode = darkMode,
             editorWebView = webView,
+            previewImages = previewImages,
             onDismiss = { showBlocks = false },
             onAdd = { id ->
                 webView?.evaluateJavascript("window.Elekto?.addBlock('$id')", null)
@@ -346,6 +356,7 @@ private fun ElektoHybridApp(
 private fun BlockCatalogSheet(
     darkMode: Boolean,
     editorWebView: WebView?,
+    previewImages: Map<String, String>,
     onDismiss: () -> Unit,
     onAdd: (String) -> Unit
 ) {
@@ -393,7 +404,8 @@ private fun BlockCatalogSheet(
                             BlocklyBlockPreview(
                                 id = block.id,
                                 darkMode = darkMode,
-                                editorWebView = editorWebView
+                                editorWebView = editorWebView,
+                                dataUrl = previewImages[block.id]
                             )
                             Text(block.description, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             if (block.id == "compare") {
@@ -478,22 +490,14 @@ private fun ComparisonMeaning(
 private fun BlocklyBlockPreview(
     id: String,
     darkMode: Boolean,
-    editorWebView: WebView?
+    editorWebView: WebView?,
+    dataUrl: String?
 ) {
-    var previewDataUrl by remember(id, darkMode) { mutableStateOf<String?>(null) }
-
     LaunchedEffect(id, darkMode, editorWebView) {
-        previewDataUrl = null
         editorWebView?.evaluateJavascript(
-            "window.Elekto?.renderPreview('$id')"
-        ) { raw ->
-            val decoded = try {
-                JSONTokener(raw).nextValue() as? String
-            } catch (_: Exception) {
-                null
-            }
-            previewDataUrl = decoded
-        }
+            "window.Elekto?.requestPreview('$id')",
+            null
+        )
     }
 
     Surface(
@@ -501,7 +505,7 @@ private fun BlocklyBlockPreview(
         shape = RoundedCornerShape(12.dp),
         color = MaterialTheme.colorScheme.surfaceVariant
     ) {
-        if (previewDataUrl == null) {
+        if (dataUrl == null) {
             Box(contentAlignment = Alignment.Center) {
                 Text(
                     "Vorschau wird erstellt …",
@@ -510,7 +514,7 @@ private fun BlocklyBlockPreview(
                 )
             }
         } else {
-            key(previewDataUrl) {
+            key(dataUrl) {
                 AndroidView(
                     modifier = Modifier.fillMaxSize(),
                     factory = { context ->
@@ -522,11 +526,11 @@ private fun BlocklyBlockPreview(
                             isVerticalScrollBarEnabled = false
                             isHorizontalScrollBarEnabled = false
                             setBackgroundColor(android.graphics.Color.TRANSPARENT)
-                            loadUrl(previewDataUrl!!)
+                            loadUrl(dataUrl)
                         }
                     },
                     update = { view ->
-                        if (view.url != previewDataUrl) view.loadUrl(previewDataUrl!!)
+                        if (view.url != dataUrl) view.loadUrl(dataUrl)
                     }
                 )
             }
