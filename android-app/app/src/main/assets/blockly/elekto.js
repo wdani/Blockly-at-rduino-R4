@@ -198,7 +198,7 @@
     toolbox: null,
     theme: elektoLightTheme,
     renderer: 'zelos',
-    trashcan: true,
+    trashcan: false,
     sounds: false,
     move: { scrollbars: false, drag: true, wheel: false },
     zoom: {
@@ -462,9 +462,42 @@
     root.style.filter = active ? 'drop-shadow(0 3px 7px rgba(35,120,230,.28))' : '';
   }
 
+  let lastPointer = { x: -1, y: -1 };
+  function rememberPointer(event) {
+    const point = event.touches?.[0] || event.changedTouches?.[0] || event;
+    if (typeof point?.clientX === 'number' && typeof point?.clientY === 'number') {
+      lastPointer = { x: point.clientX, y: point.clientY };
+    }
+  }
+  document.addEventListener('pointermove', rememberPointer, true);
+  document.addEventListener('pointerup', rememberPointer, true);
+  document.addEventListener('touchmove', rememberPointer, { capture: true, passive: true });
+  document.addEventListener('touchend', rememberPointer, { capture: true, passive: true });
+
+  function pointerInNativeTrashZone() {
+    const zoneWidth = 132;
+    const zoneHeight = 104;
+    return lastPointer.x >= window.innerWidth - zoneWidth &&
+           lastPointer.y >= window.innerHeight - zoneHeight;
+  }
+
   workspace.addChangeListener(event => {
-    if (event.type === Blockly.Events.BLOCK_DRAG && event.blockId) {
-      setDraggedVisual(event.blockId, !!event.isStart);
+    if (event.type !== Blockly.Events.BLOCK_DRAG || !event.blockId) return;
+
+    const active = !!event.isStart;
+    setDraggedVisual(event.blockId, active);
+    window.ElektoAndroid?.setDragging?.(active);
+
+    if (!active && pointerInNativeTrashZone()) {
+      const block = workspace.getBlockById(event.blockId);
+      if (block && !block.isDisposed?.()) {
+        Blockly.Events.setGroup(true);
+        try {
+          block.dispose(false);
+        } finally {
+          Blockly.Events.setGroup(false);
+        }
+      }
     }
   });
 
