@@ -177,7 +177,7 @@ private fun ElektoHybridApp(
                     Column {
                         Text("Elekto Blocks", style = MaterialTheme.typography.titleMedium)
                         Text(
-                            "Hybrid 2 • Blockly-Engine",
+                            "Hybrid 3 • Blockly-Engine",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -347,17 +347,8 @@ private fun BlockCatalogSheet(
                             Text(block.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                             BlocklyBlockPreview(block.id, darkMode)
                             Text(block.description, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            block.details?.let {
-                                Surface(
-                                    shape = RoundedCornerShape(9.dp),
-                                    color = MaterialTheme.colorScheme.secondaryContainer
-                                ) {
-                                    Text(
-                                        it,
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                                        style = MaterialTheme.typography.bodySmall
-                                    )
-                                }
+                            if (block.id == "compare") {
+                                ComparisonLegend()
                             }
                             Text(
                                 block.example,
@@ -369,6 +360,66 @@ private fun BlockCatalogSheet(
                 }
                 item { Spacer(Modifier.height(28.dp)) }
             }
+        }
+    }
+}
+
+@Composable
+private fun ComparisonLegend() {
+    Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(7.dp)
+        ) {
+            ComparisonMeaning(">", "größer als", Modifier.weight(1f))
+            ComparisonMeaning("<", "kleiner als", Modifier.weight(1f))
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(7.dp)
+        ) {
+            ComparisonMeaning("=", "gleich", Modifier.weight(1f))
+            ComparisonMeaning("≥", "größer oder gleich", Modifier.weight(1f))
+        }
+        Row(modifier = Modifier.fillMaxWidth()) {
+            ComparisonMeaning("≤", "kleiner oder gleich", Modifier.weight(1f))
+            Spacer(Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun ComparisonMeaning(
+    symbol: String,
+    meaning: String,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.secondaryContainer
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Surface(
+                shape = RoundedCornerShape(7.dp),
+                color = MaterialTheme.colorScheme.primary
+            ) {
+                Text(
+                    symbol,
+                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp),
+                    color = MaterialTheme.colorScheme.onPrimary,
+                    fontWeight = FontWeight.Black
+                )
+            }
+            Text(
+                meaning,
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.SemiBold
+            )
         }
     }
 }
