@@ -44,8 +44,13 @@
   });
 
   const host=document.getElementById('preview');
-  host.style.width=window.innerWidth+'px';
-  host.style.height=window.innerHeight+'px';
+  function sizePreviewHost(){
+    const w=Math.max(1, window.innerWidth || document.documentElement.clientWidth || 320);
+    const h=Math.max(1, window.innerHeight || document.documentElement.clientHeight || 92);
+    host.style.width=w+'px';
+    host.style.height=h+'px';
+  }
+  sizePreviewHost();
   const ws=Blockly.inject('preview',{
     toolbox:null,theme,renderer:'zelos',trashcan:false,sounds:false,
     move:{scrollbars:false,drag:false,wheel:false},
@@ -82,11 +87,17 @@
   }
   if(!b.getSvgRoot?.()){ b.initSvg(); b.render(); }
   b.moveBy(10,10);
-  requestAnimationFrame(()=>{
+  function fit(){
+    sizePreviewHost();
+    Blockly.svgResize(ws);
     try{
       ws.zoomToFit();
       ws.centerOnBlock(b.id);
     }catch(_){}
     Blockly.svgResize(ws);
-  });
+  }
+  requestAnimationFrame(fit);
+  setTimeout(fit,80);
+  setTimeout(fit,300);
+  window.addEventListener('resize',fit);
 })();
