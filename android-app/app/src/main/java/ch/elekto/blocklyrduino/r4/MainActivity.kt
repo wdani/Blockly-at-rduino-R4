@@ -1,12 +1,12 @@
 package ch.elekto.blocklyrduino.r4
 
 import android.annotation.SuppressLint
-import android.graphics.Color as AndroidColor
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
+import org.json.JSONTokener
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -189,7 +189,7 @@ private fun ElektoHybridApp(
                     Column {
                         Text("Elekto Blocks", style = MaterialTheme.typography.titleMedium)
                         Text(
-                            "Hybrid 4 • Blockly-Engine",
+                            "Hybrid 5 • Blockly-Engine",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -320,6 +320,7 @@ private fun ElektoHybridApp(
     if (showBlocks) {
         BlockCatalogSheet(
             darkMode = darkMode,
+            editorWebView = webView,
             onDismiss = { showBlocks = false },
             onAdd = { id ->
                 webView?.evaluateJavascript("window.Elekto?.addBlock('$id')", null)
@@ -344,6 +345,7 @@ private fun ElektoHybridApp(
 @Composable
 private fun BlockCatalogSheet(
     darkMode: Boolean,
+    editorWebView: WebView?,
     onDismiss: () -> Unit,
     onAdd: (String) -> Unit
 ) {
@@ -388,7 +390,11 @@ private fun BlockCatalogSheet(
                             verticalArrangement = Arrangement.spacedBy(9.dp)
                         ) {
                             Text(block.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                            BlocklyBlockPreview(block.id, darkMode)
+                            BlocklyBlockPreview(
+                                id = block.id,
+                                darkMode = darkMode,
+                                editorWebView = editorWebView
+                            )
                             Text(block.description, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             if (block.id == "compare") {
                                 ComparisonLegend()
@@ -469,32 +475,62 @@ private fun ComparisonMeaning(
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-private fun BlocklyBlockPreview(id: String, darkMode: Boolean) {
-    val theme = if (darkMode) "dark" else "light"
-    key(id, theme) {
-        AndroidView(
-            modifier = Modifier.fillMaxWidth().height(116.dp),
-            factory = { context ->
-                val loader = WebViewAssetLoader.Builder()
-                    .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(context))
-                    .build()
-                WebView(context).apply {
-                    setBackgroundColor(AndroidColor.TRANSPARENT)
-                    settings.javaScriptEnabled = true
-                    settings.allowFileAccess = false
-                    settings.allowContentAccess = false
-                    settings.setSupportZoom(false)
-                    isVerticalScrollBarEnabled = false
-                    isHorizontalScrollBarEnabled = false
-                    webViewClient = object : WebViewClientCompat() {
-                        override fun shouldInterceptRequest(
-                            view: WebView,
-                            request: android.webkit.WebResourceRequest
-                        ) = loader.shouldInterceptRequest(request.url)
-                    }
-                    loadUrl("https://appassets.androidplatform.net/assets/blockly/preview.html?id=$id&theme=$theme")
-                }
+private fun BlocklyBlockPreview(
+    id: String,
+    darkMode: Boolean,
+    editorWebView: WebView?
+) {
+    var previewDataUrl by remember(id, darkMode) { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(id, darkMode, editorWebView) {
+        previewDataUrl = null
+        editorWebView?.evaluateJavascript(
+            "window.Elekto?.renderPreview('$id')"
+        ) { raw ->
+            val decoded = try {
+                JSONTokener(raw).nextValue() as? String
+            } catch (_: Exception) {
+                null
             }
-        )
+            previewDataUrl = decoded
+        }
+    }
+
+    Surface(
+        modifier = Modifier.fillMaxWidth().height(116.dp),
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant
+    ) {
+        if (previewDataUrl == null) {
+            Box(contentAlignment = Alignment.Center) {
+                Text(
+                    "Vorschau wird erstellt …",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        } else {
+            key(previewDataUrl) {
+                AndroidView(
+                    modifier = Modifier.fillMaxSize(),
+                    factory = { context ->
+                        WebView(context).apply {
+                            settings.javaScriptEnabled = false
+                            settings.allowFileAccess = false
+                            settings.allowContentAccess = false
+                            settings.setSupportZoom(false)
+                            isVerticalScrollBarEnabled = false
+                            isHorizontalScrollBarEnabled = false
+                            setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                            loadUrl(previewDataUrl!!)
+                        }
+                    },
+                    update = { view ->
+                        if (view.url != previewDataUrl) view.loadUrl(previewDataUrl!!)
+                    }
+                )
+            }
+        }
     }
 }
+
