@@ -18,7 +18,34 @@
     return;
   }
 
-  const elektoTheme = Blockly.Theme.defineTheme('elekto', {
+  const lightComponents = {
+      workspaceBackgroundColour: '#FAFAFD',
+      toolboxBackgroundColour: '#FFFFFF',
+      toolboxForegroundColour: '#33333D',
+      flyoutBackgroundColour: '#F0F1F6',
+      flyoutForegroundColour: '#30303A',
+      flyoutOpacity: 1,
+      scrollbarColour: '#AEB1BC',
+      insertionMarkerColour: '#55A9FF',
+      insertionMarkerOpacity: 0.45,
+      cursorColour: '#2E87E8'
+  };
+  const darkComponents = {
+      workspaceBackgroundColour: '#121217',
+      toolboxBackgroundColour: '#1B1B22',
+      toolboxForegroundColour: '#EEEEF5',
+      flyoutBackgroundColour: '#202028',
+      flyoutForegroundColour: '#F1F1F6',
+      flyoutOpacity: 1,
+      scrollbarColour: '#565663',
+      insertionMarkerColour: '#65B5FF',
+      insertionMarkerOpacity: 0.52,
+      cursorColour: '#65B5FF'
+  };
+
+  function makeTheme(name, components) {
+    return Blockly.Theme.defineTheme(name, {
+
     base: Blockly.Themes.Zelos || Blockly.Themes.Classic,
     blockStyles: {
       time_blocks: { colourPrimary: '#6C55C7', colourSecondary: '#5A46AA', colourTertiary: '#48368D' },
@@ -34,25 +61,19 @@
       logic_category: { colour: '#C25235' },
       loops_category: { colour: '#D89A00' }
     },
-    componentStyles: {
-      workspaceBackgroundColour: '#FAFAFD',
-      toolboxBackgroundColour: '#FFFFFF',
-      toolboxForegroundColour: '#33333D',
-      flyoutBackgroundColour: '#F0F1F6',
-      flyoutForegroundColour: '#30303A',
-      flyoutOpacity: 1,
-      scrollbarColour: '#AEB1BC',
-      insertionMarkerColour: '#55A9FF',
-      insertionMarkerOpacity: 0.45,
-      cursorColour: '#2E87E8'
-    },
+    componentStyles: components,
     fontStyle: {
       family: 'system-ui, sans-serif',
       weight: '600',
       size: 12
     },
     startHats: true
-  });
+    });
+  }
+
+  const elektoLightTheme = makeTheme('elekto-light', lightComponents);
+  const elektoDarkTheme = makeTheme('elekto-dark', darkComponents);
+  let currentThemeName = 'light';
 
   Blockly.defineBlocksWithJsonArray([
     {
@@ -175,13 +196,13 @@
 
   const workspace = Blockly.inject('workspace', {
     toolbox: null,
-    theme: elektoTheme,
+    theme: elektoLightTheme,
     renderer: 'zelos',
-    trashcan: true,
+    trashcan: false,
     sounds: false,
-    move: { scrollbars: true, drag: true, wheel: false },
+    move: { scrollbars: false, drag: true, wheel: false },
     zoom: {
-      controls: true,
+      controls: false,
       wheel: false,
       startScale: 0.85,
       maxScale: 1.6,
@@ -447,7 +468,28 @@
     }
   });
 
+  function applyTheme(name) {
+    currentThemeName = name === 'dark' ? 'dark' : 'light';
+    workspace.setTheme(currentThemeName === 'dark' ? elektoDarkTheme : elektoLightTheme);
+    document.body.dataset.theme = currentThemeName;
+  }
+
   window.Elekto = {
+    setTheme(name) {
+      applyTheme(name);
+    },
+    zoomIn() {
+      workspace.zoomCenter(1);
+    },
+    zoomOut() {
+      workspace.zoomCenter(-1);
+    },
+    resetZoom() {
+      const metrics = workspace.getMetrics();
+      if (workspace.setScale) workspace.setScale(0.85);
+      else workspace.zoomToFit();
+      workspace.scrollCenter?.();
+    },
     addBlock(id) {
       createCatalogBlock(id);
     },
