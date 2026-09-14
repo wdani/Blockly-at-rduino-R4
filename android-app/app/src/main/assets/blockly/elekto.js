@@ -198,7 +198,7 @@
     toolbox: null,
     theme: elektoLightTheme,
     renderer: 'zelos',
-    trashcan: false,
+    trashcan: true,
     sounds: false,
     move: { scrollbars: false, drag: true, wheel: false },
     zoom: {
