@@ -3,6 +3,8 @@ package ch.elekto.blocklyrduino.r4
 import android.annotation.SuppressLint
 import android.graphics.Color as AndroidColor
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import androidx.activity.ComponentActivity
@@ -28,6 +30,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.Undo
@@ -87,9 +90,17 @@ private fun ElektoRoot() {
     }
 }
 
-private class ElektoBridge(private val onCode: (String) -> Unit) {
+private class ElektoBridge(
+    private val onCode: (String) -> Unit,
+    private val onDraggingChanged: (Boolean) -> Unit
+) {
+    private val mainHandler = Handler(Looper.getMainLooper())
+
     @JavascriptInterface
-    fun showCode(code: String) = onCode(code)
+    fun showCode(code: String) = mainHandler.post { onCode(code) }
+
+    @JavascriptInterface
+    fun setDragging(active: Boolean) = mainHandler.post { onDraggingChanged(active) }
 }
 
 private enum class BlockCategory(val title: String) {
@@ -158,6 +169,7 @@ private fun ElektoHybridApp(
     var webView by remember { mutableStateOf<WebView?>(null) }
     var generatedCode by remember { mutableStateOf<String?>(null) }
     var showBlocks by remember { mutableStateOf(false) }
+    var isDraggingBlock by remember { mutableStateOf(false) }
 
     fun applyEditorTheme(view: WebView?) {
         val name = if (darkMode) "dark" else "light"
@@ -177,7 +189,7 @@ private fun ElektoHybridApp(
                     Column {
                         Text("Elekto Blocks", style = MaterialTheme.typography.titleMedium)
                         Text(
-                            "Hybrid 3 • Blockly-Engine",
+                            "Hybrid 4 • Blockly-Engine",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -203,11 +215,36 @@ private fun ElektoHybridApp(
             )
         },
         floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = { showBlocks = true },
-                icon = { Text("+", style = MaterialTheme.typography.headlineSmall) },
-                text = { Text("Blöcke") }
-            )
+            if (isDraggingBlock) {
+                Surface(
+                    modifier = Modifier.width(126.dp).height(76.dp),
+                    shape = RoundedCornerShape(24.dp),
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    shadowElevation = 8.dp
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            Icons.Default.DeleteForever,
+                            contentDescription = "Block löschen",
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                        Text(
+                            "Hier löschen",
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            } else {
+                ExtendedFloatingActionButton(
+                    onClick = { showBlocks = true },
+                    icon = { Text("+", style = MaterialTheme.typography.headlineSmall) },
+                    text = { Text("Blöcke") }
+                )
+            }
         }
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
@@ -226,7 +263,13 @@ private fun ElektoHybridApp(
                         settings.setSupportZoom(false)
                         isVerticalScrollBarEnabled = false
                         isHorizontalScrollBarEnabled = false
-                        addJavascriptInterface(ElektoBridge { generatedCode = it }, "ElektoAndroid")
+                        addJavascriptInterface(
+                            ElektoBridge(
+                                onCode = { generatedCode = it },
+                                onDraggingChanged = { isDraggingBlock = it }
+                            ),
+                            "ElektoAndroid"
+                        )
                         webViewClient = object : WebViewClientCompat() {
                             override fun shouldInterceptRequest(
                                 view: WebView,
@@ -430,7 +473,7 @@ private fun BlocklyBlockPreview(id: String, darkMode: Boolean) {
     val theme = if (darkMode) "dark" else "light"
     key(id, theme) {
         AndroidView(
-            modifier = Modifier.fillMaxWidth().height(92.dp),
+            modifier = Modifier.fillMaxWidth().height(116.dp),
             factory = { context ->
                 val loader = WebViewAssetLoader.Builder()
                     .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(context))
