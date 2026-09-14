@@ -501,6 +501,130 @@
     }
   });
 
+  function createPreviewBlock(previewWorkspace, id) {
+    function number(v) {
+      const b = previewWorkspace.newBlock('math_number');
+      b.setFieldValue(String(v), 'NUM');
+      b.setShadow(true);
+      b.initSvg();
+      b.render();
+      return b;
+    }
+
+    let block;
+    switch (id) {
+      case 'delay':
+        block = previewWorkspace.newBlock('elekto_delay');
+        block.initSvg(); block.render();
+        number(1000).outputConnection.connect(block.getInput('TIME').connection);
+        break;
+      case 'digital_write':
+        block = previewWorkspace.newBlock('elekto_digital_write');
+        break;
+      case 'analog_read':
+        block = previewWorkspace.newBlock('elekto_analog_read');
+        break;
+      case 'number':
+        block = previewWorkspace.newBlock('math_number');
+        block.setFieldValue('1000', 'NUM');
+        break;
+      case 'compare':
+        block = previewWorkspace.newBlock('logic_compare');
+        block.initSvg(); block.render();
+        number(0).outputConnection.connect(block.getInput('A').connection);
+        number(500).outputConnection.connect(block.getInput('B').connection);
+        break;
+      case 'if':
+        block = previewWorkspace.newBlock('elekto_if');
+        break;
+      case 'repeat':
+        block = previewWorkspace.newBlock('elekto_repeat');
+        block.initSvg(); block.render();
+        number(10).outputConnection.connect(block.getInput('COUNT').connection);
+        break;
+      default:
+        block = previewWorkspace.newBlock('math_number');
+        block.setFieldValue('0', 'NUM');
+    }
+    if (!block.getSvgRoot?.()) {
+      block.initSvg();
+      block.render();
+    }
+    return block;
+  }
+
+  function copyComputedSvgStyle(source, target) {
+    if (source.nodeType !== Node.ELEMENT_NODE || target.nodeType !== Node.ELEMENT_NODE) return;
+    const cs = getComputedStyle(source);
+    const props = [
+      'fill','fill-opacity','stroke','stroke-width','stroke-opacity',
+      'font-family','font-size','font-weight','font-style',
+      'color','opacity','display','visibility'
+    ];
+    let inline = target.getAttribute('style') || '';
+    for (const prop of props) {
+      const value = cs.getPropertyValue(prop);
+      if (value) inline += prop + ':' + value + ';';
+    }
+    target.setAttribute('style', inline);
+
+    const sc = source.children;
+    const tc = target.children;
+    for (let i = 0; i < Math.min(sc.length, tc.length); i++) {
+      copyComputedSvgStyle(sc[i], tc[i]);
+    }
+  }
+
+  function renderPreviewSvg(id) {
+    const holder = document.createElement('div');
+    holder.style.cssText =
+      'position:fixed;left:-10000px;top:-10000px;width:600px;height:360px;visibility:hidden;';
+    document.body.appendChild(holder);
+
+    let previewWorkspace = null;
+    try {
+      previewWorkspace = Blockly.inject(holder, {
+        toolbox: null,
+        theme: currentThemeName === 'dark' ? elektoDarkTheme : elektoLightTheme,
+        renderer: 'zelos',
+        trashcan: false,
+        sounds: false,
+        move: { scrollbars: false, drag: false, wheel: false },
+        zoom: { controls: false, wheel: false, pinch: false, startScale: 1 }
+      });
+
+      const block = createPreviewBlock(previewWorkspace, id);
+      block.moveBy(24, 24);
+      Blockly.svgResize(previewWorkspace);
+
+      const root = block.getSvgRoot();
+      const bbox = root.getBBox();
+      const clone = root.cloneNode(true);
+      copyComputedSvgStyle(root, clone);
+
+      const pad = 12;
+      const width = Math.ceil(bbox.width + pad * 2);
+      const height = Math.ceil(bbox.height + pad * 2);
+      clone.setAttribute(
+        'transform',
+        'translate(' + (pad - bbox.x) + ' ' + (pad - bbox.y) + ')'
+      );
+
+      const bg = currentThemeName === 'dark' ? '#1B1B22' : '#F9FAFD';
+      const svg =
+        '<svg xmlns="http://www.w3.org/2000/svg" width="' + width + '" height="' + height +
+        '" viewBox="0 0 ' + width + ' ' + height + '">' +
+        '<rect width="100%" height="100%" rx="10" fill="' + bg + '"/>' +
+        new XMLSerializer().serializeToString(clone) +
+        '</svg>';
+
+      return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+    } finally {
+      try { previewWorkspace?.dispose(); } catch (_) {}
+      holder.remove();
+    }
+  }
+
   function applyTheme(name) {
     currentThemeName = name === 'dark' ? 'dark' : 'light';
     workspace.setTheme(currentThemeName === 'dark' ? elektoDarkTheme : elektoLightTheme);
@@ -508,6 +632,9 @@
   }
 
   window.Elekto = {
+    renderPreview(id) {
+      return renderPreviewSvg(id);
+    },
     setTheme(name) {
       applyTheme(name);
     },
