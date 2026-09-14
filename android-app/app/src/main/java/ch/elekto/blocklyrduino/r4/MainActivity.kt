@@ -195,7 +195,7 @@ private fun ElektoHybridApp(
                     Column {
                         Text("Elekto Blocks", style = MaterialTheme.typography.titleMedium)
                         Text(
-                            "Hybrid 6 • Blockly-Engine",
+                            "Hybrid 7 • Blockly-Engine",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
