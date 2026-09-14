@@ -673,8 +673,13 @@
   }
 
   window.Elekto = {
-    async renderPreview(id) {
-      return await renderPreviewPng(id);
+    async requestPreview(id) {
+      try {
+        const data = await renderPreviewPng(id);
+        window.ElektoAndroid?.setPreview?.(id, data);
+      } catch (error) {
+        console.error('Preview render failed', id, error);
+      }
     },
     setTheme(name) {
       applyTheme(name);
