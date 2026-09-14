@@ -575,10 +575,10 @@
     }
   }
 
-  function renderPreviewSvg(id) {
+  async function renderPreviewPng(id) {
     const holder = document.createElement('div');
     holder.style.cssText =
-      'position:fixed;left:-10000px;top:-10000px;width:600px;height:360px;visibility:hidden;';
+      'position:fixed;left:-10000px;top:-10000px;width:700px;height:420px;visibility:hidden;';
     document.body.appendChild(holder);
 
     let previewWorkspace = null;
@@ -594,36 +594,77 @@
       });
 
       const block = createPreviewBlock(previewWorkspace, id);
-      block.moveBy(24, 24);
+      block.moveBy(40, 40);
       Blockly.svgResize(previewWorkspace);
 
       const root = block.getSvgRoot();
-      const bbox = root.getBBox();
-      const clone = root.cloneNode(true);
-      copyComputedSvgStyle(root, clone);
+      const bbox = root.getBoundingClientRect();
+      const sourceSvg = previewWorkspace.getParentSvg();
 
-      const pad = 12;
+      // Clone the whole Blockly SVG so its defs, CSS-dependent shapes and
+      // internal rendering resources remain available. Crop via viewBox.
+      const cloneSvg = sourceSvg.cloneNode(true);
+      const pad = 18;
+      const svgRect = sourceSvg.getBoundingClientRect();
+      const x = Math.max(0, bbox.left - svgRect.left - pad);
+      const y = Math.max(0, bbox.top - svgRect.top - pad);
       const width = Math.ceil(bbox.width + pad * 2);
       const height = Math.ceil(bbox.height + pad * 2);
-      clone.setAttribute(
-        'transform',
-        'translate(' + (pad - bbox.x) + ' ' + (pad - bbox.y) + ')'
-      );
 
-      const bg = currentThemeName === 'dark' ? '#1B1B22' : '#F9FAFD';
-      const svg =
-        '<svg xmlns="http://www.w3.org/2000/svg" width="' + width + '" height="' + height +
-        '" viewBox="0 0 ' + width + ' ' + height + '">' +
-        '<rect width="100%" height="100%" rx="10" fill="' + bg + '"/>' +
-        new XMLSerializer().serializeToString(clone) +
-        '</svg>';
+      cloneSvg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+      cloneSvg.setAttribute('width', String(width));
+      cloneSvg.setAttribute('height', String(height));
+      cloneSvg.setAttribute('viewBox', x + ' ' + y + ' ' + width + ' ' + height);
 
-      return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+      // Inline the styles that matter for Blockly because CSS from the page
+      // does not automatically survive serialization into an image.
+      const sourceNodes = sourceSvg.querySelectorAll('*');
+      const cloneNodes = cloneSvg.querySelectorAll('*');
+      const count = Math.min(sourceNodes.length, cloneNodes.length);
+      for (let i = 0; i < count; i++) {
+        const cs = getComputedStyle(sourceNodes[i]);
+        const props = [
+          'fill','fill-opacity','stroke','stroke-width','stroke-opacity',
+          'font-family','font-size','font-weight','font-style',
+          'color','opacity','display','visibility'
+        ];
+        let inline = cloneNodes[i].getAttribute('style') || '';
+        for (const prop of props) {
+          const value = cs.getPropertyValue(prop);
+          if (value) inline += prop + ':' + value + ';';
+        }
+        cloneNodes[i].setAttribute('style', inline);
+      }
+
+      const xml = new XMLSerializer().serializeToString(cloneSvg);
+      const svgUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(xml);
+
+      return await new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+          try {
+            const scale = 2;
+            const canvas = document.createElement('canvas');
+            canvas.width = width * scale;
+            canvas.height = height * scale;
+            const ctx = canvas.getContext('2d');
+            ctx.scale(scale, scale);
+            ctx.clearRect(0, 0, width, height);
+            ctx.drawImage(img, 0, 0, width, height);
+            resolve(canvas.toDataURL('image/png'));
+          } catch (error) {
+            reject(error);
+          }
+        };
+        img.onerror = () => reject(new Error('Blockvorschau konnte nicht gerastert werden.'));
+        img.src = svgUrl;
+      });
     } finally {
       try { previewWorkspace?.dispose(); } catch (_) {}
       holder.remove();
     }
   }
+
 
   function applyTheme(name) {
     currentThemeName = name === 'dark' ? 'dark' : 'light';
@@ -632,8 +673,8 @@
   }
 
   window.Elekto = {
-    renderPreview(id) {
-      return renderPreviewSvg(id);
+    async renderPreview(id) {
+      return await renderPreviewPng(id);
     },
     setTheme(name) {
       applyTheme(name);
