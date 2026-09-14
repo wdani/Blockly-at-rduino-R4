@@ -578,7 +578,7 @@
   async function renderPreviewPng(id) {
     const holder = document.createElement('div');
     holder.style.cssText =
-      'position:fixed;left:-10000px;top:-10000px;width:700px;height:420px;visibility:hidden;';
+      'position:fixed;left:-12000px;top:0;width:700px;height:420px;pointer-events:none;';
     document.body.appendChild(holder);
 
     let previewWorkspace = null;
@@ -594,49 +594,64 @@
       });
 
       const block = createPreviewBlock(previewWorkspace, id);
-      block.moveBy(40, 40);
+      block.moveBy(32, 32);
       Blockly.svgResize(previewWorkspace);
 
-      const root = block.getSvgRoot();
-      const bbox = root.getBoundingClientRect();
       const sourceSvg = previewWorkspace.getParentSvg();
-
-      // Clone the whole Blockly SVG so its defs, CSS-dependent shapes and
-      // internal rendering resources remain available. Crop via viewBox.
-      const cloneSvg = sourceSvg.cloneNode(true);
-      const pad = 18;
-      const svgRect = sourceSvg.getBoundingClientRect();
-      const x = Math.max(0, bbox.left - svgRect.left - pad);
-      const y = Math.max(0, bbox.top - svgRect.top - pad);
+      const root = block.getSvgRoot();
+      const bbox = root.getBBox();
+      const pad = 14;
       const width = Math.ceil(bbox.width + pad * 2);
       const height = Math.ceil(bbox.height + pad * 2);
 
-      cloneSvg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-      cloneSvg.setAttribute('width', String(width));
-      cloneSvg.setAttribute('height', String(height));
-      cloneSvg.setAttribute('viewBox', x + ' ' + y + ' ' + width + ' ' + height);
+      const svgNS = 'http://www.w3.org/2000/svg';
+      const standalone = document.createElementNS(svgNS, 'svg');
+      standalone.setAttribute('xmlns', svgNS);
+      standalone.setAttribute('width', String(width));
+      standalone.setAttribute('height', String(height));
+      standalone.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
 
-      // Inline the styles that matter for Blockly because CSS from the page
-      // does not automatically survive serialization into an image.
-      const sourceNodes = sourceSvg.querySelectorAll('*');
-      const cloneNodes = cloneSvg.querySelectorAll('*');
-      const count = Math.min(sourceNodes.length, cloneNodes.length);
-      for (let i = 0; i < count; i++) {
-        const cs = getComputedStyle(sourceNodes[i]);
+      const defs = sourceSvg.querySelector('defs');
+      if (defs) standalone.appendChild(defs.cloneNode(true));
+
+      const clone = root.cloneNode(true);
+
+      function inlineStyles(source, target) {
+        if (source.nodeType !== Node.ELEMENT_NODE || target.nodeType !== Node.ELEMENT_NODE) return;
+        const cs = getComputedStyle(source);
         const props = [
           'fill','fill-opacity','stroke','stroke-width','stroke-opacity',
           'font-family','font-size','font-weight','font-style',
           'color','opacity','display','visibility'
         ];
-        let inline = cloneNodes[i].getAttribute('style') || '';
+        let inline = target.getAttribute('style') || '';
         for (const prop of props) {
           const value = cs.getPropertyValue(prop);
           if (value) inline += prop + ':' + value + ';';
         }
-        cloneNodes[i].setAttribute('style', inline);
+        // The preview workspace is off-screen, not hidden. Still force the
+        // exported block itself to be visible.
+        inline += 'visibility:visible;';
+        target.setAttribute('style', inline);
+
+        const sc = source.children;
+        const tc = target.children;
+        for (let i = 0; i < Math.min(sc.length, tc.length); i++) {
+          inlineStyles(sc[i], tc[i]);
+        }
       }
 
-      const xml = new XMLSerializer().serializeToString(cloneSvg);
+      inlineStyles(root, clone);
+
+      // Ignore the workspace translation and place the isolated block into
+      // its own tiny SVG.
+      clone.setAttribute(
+        'transform',
+        'translate(' + (pad - bbox.x) + ' ' + (pad - bbox.y) + ')'
+      );
+      standalone.appendChild(clone);
+
+      const xml = new XMLSerializer().serializeToString(standalone);
       const svgUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(xml);
 
       return await new Promise((resolve, reject) => {
@@ -656,7 +671,7 @@
             reject(error);
           }
         };
-        img.onerror = () => reject(new Error('Blockvorschau konnte nicht gerastert werden.'));
+        img.onerror = () => reject(new Error('Isolierter Block konnte nicht gerastert werden.'));
         img.src = svgUrl;
       });
     } finally {
