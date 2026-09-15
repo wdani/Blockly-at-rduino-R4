@@ -195,7 +195,7 @@ private fun ElektoHybridApp(
                     Column {
                         Text("Elekto Blocks", style = MaterialTheme.typography.titleMedium)
                         Text(
-                            "Hybrid 7 • Blockly-Engine",
+                            "Hybrid 8 • Blockly-Engine",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -526,11 +526,43 @@ private fun BlocklyBlockPreview(
                             isVerticalScrollBarEnabled = false
                             isHorizontalScrollBarEnabled = false
                             setBackgroundColor(android.graphics.Color.TRANSPARENT)
-                            loadUrl(dataUrl)
+                            val html = """
+                                <!doctype html>
+                                <html>
+                                  <head>
+                                    <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+                                    <style>
+                                      html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent}
+                                      body{display:flex;align-items:center;justify-content:center}
+                                      img{display:block;max-width:92%;max-height:82%;width:auto;height:auto;object-fit:contain}
+                                    </style>
+                                  </head>
+                                  <body><img src="$dataUrl"></body>
+                                </html>
+                            """.trimIndent()
+                            loadDataWithBaseURL(null, html, "text/html", "UTF-8", null)
+                            tag = dataUrl
                         }
                     },
                     update = { view ->
-                        if (view.url != dataUrl) view.loadUrl(dataUrl)
+                        if (view.tag != dataUrl) {
+                            val html = """
+                                <!doctype html>
+                                <html>
+                                  <head>
+                                    <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+                                    <style>
+                                      html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent}
+                                      body{display:flex;align-items:center;justify-content:center}
+                                      img{display:block;max-width:92%;max-height:82%;width:auto;height:auto;object-fit:contain}
+                                    </style>
+                                  </head>
+                                  <body><img src="$dataUrl"></body>
+                                </html>
+                            """.trimIndent()
+                            view.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null)
+                            view.tag = dataUrl
+                        }
                     }
                 )
             }
