@@ -53,8 +53,8 @@ jobs:
           cp android-app/blockly-package/node_modules/blockly/blocks_compressed.js android-app/app/src/main/assets/blockly/vendor/
           cp android-app/blockly-package/node_modules/blockly/msg/de.js android-app/app/src/main/assets/blockly/vendor/msg/
 
-      - name: Run Blockly block-action tests
-        run: node --test android-app/tests/block-actions.test.cjs
+      - name: Run Blockly tests
+        run: node --test android-app/tests/block-actions.test.cjs android-app/tests/blueprint-engine.test.cjs
 
       - name: Stamp visible Hybrid version
         run: |
