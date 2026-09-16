@@ -14,6 +14,11 @@
     return !!selection;
   }
 
+  function reportError(error, fallback) {
+    const message = error?.message || fallback;
+    window.ElektoAndroid?.blueprintError?.(message);
+  }
+
   function findBlockFromTarget(target) {
     let node = target;
     while (node && node !== document.body) {
@@ -106,22 +111,35 @@
   }, true);
 
   window.Elekto.startBlueprintSelection = function startBlueprintSelection(blockId) {
-    const next = window.ElektoBlueprintEngine.createSelection(workspace, blockId);
-    if (next.getSelectedRootIds().length === 0) return false;
-    workspace.cancelCurrentGesture?.();
-    selection = next;
-    pointerDown = null;
-    refreshHighlight();
-    reportSelection();
-    return true;
+    try {
+      const next = window.ElektoBlueprintEngine.createSelection(workspace, blockId);
+      if (next.getSelectedRootIds().length === 0) {
+        reportError(null, 'Der ausgewählte Block ist nicht mehr vorhanden.');
+        return false;
+      }
+      workspace.cancelCurrentGesture?.();
+      selection = next;
+      pointerDown = null;
+      refreshHighlight();
+      reportSelection();
+      return true;
+    } catch (error) {
+      reportError(error, 'Blueprint-Auswahl konnte nicht gestartet werden.');
+      return false;
+    }
   };
 
   window.Elekto.requestBlueprintPayload = function requestBlueprintPayload() {
     if (!selection) return false;
-    const payload = selection.serialize();
-    if (payload.groupCount < 1) return false;
-    window.ElektoAndroid?.blueprintPayloadReady?.(JSON.stringify(payload));
-    return true;
+    try {
+      const payload = selection.serialize();
+      if (payload.groupCount < 1) return false;
+      window.ElektoAndroid?.blueprintPayloadReady?.(JSON.stringify(payload));
+      return true;
+    } catch (error) {
+      reportError(error, 'Blueprint konnte nicht vorbereitet werden.');
+      return false;
+    }
   };
 
   window.Elekto.cancelBlueprintSelection = function cancelBlueprintSelection() {
@@ -139,14 +157,13 @@
   window.Elekto.isBlueprintSelectionActive = active;
 
   window.Elekto.insertBlueprint = function insertBlueprint(payloadJson) {
-    const payload = typeof payloadJson === 'string' ? JSON.parse(payloadJson) : payloadJson;
-    const metrics = workspace.getMetrics();
-    const scale = workspace.scale || 1;
-    const anchorX = ((metrics.viewLeft || 0) + (metrics.viewWidth || 320) * 0.32) / scale;
-    const anchorY = ((metrics.viewTop || 0) + (metrics.viewHeight || 520) * 0.24) / scale;
-
     Blockly.Events.setGroup(true);
     try {
+      const payload = typeof payloadJson === 'string' ? JSON.parse(payloadJson) : payloadJson;
+      const metrics = workspace.getMetrics();
+      const scale = workspace.scale || 1;
+      const anchorX = ((metrics.viewLeft || 0) + (metrics.viewWidth || 320) * 0.32) / scale;
+      const anchorY = ((metrics.viewTop || 0) + (metrics.viewHeight || 520) * 0.24) / scale;
       const result = window.ElektoBlueprintEngine.insert(workspace, payload, anchorX, anchorY);
       if (result.rootIds.length) workspace.getBlockById(result.rootIds[0])?.select?.();
       Blockly.svgResize(workspace);
@@ -154,7 +171,8 @@
       return result;
     } catch (error) {
       console.error('Blueprint insertion failed', error);
-      throw error;
+      reportError(error, 'Blueprint konnte nicht eingefügt werden.');
+      return null;
     } finally {
       Blockly.Events.setGroup(false);
     }
