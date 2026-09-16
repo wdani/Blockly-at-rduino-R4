@@ -58,7 +58,7 @@ jobs:
 
       - name: Stamp visible Hybrid version
         run: |
-          sed -i -E 's/Hybrid [0-9]+ • Blockly-Engine/Hybrid 13 • Blockly-Engine/' android-app/app/src/main/java/ch/elekto/blocklyrduino/r4/MainActivity.kt
+          sed -i -E 's/Hybrid [0-9]+ • Blockly-Engine/Hybrid 14 • Blockly-Engine/' android-app/app/src/main/java/ch/elekto/blocklyrduino/r4/MainActivity.kt
 
       - name: Build Blockly POC APK
         run: gradle -p android-app :app:assembleDebug
@@ -66,6 +66,6 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Elekto-Blocks-Hybrid-13
+          name: Elekto-Blocks-Hybrid-14
           path: android-app/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
