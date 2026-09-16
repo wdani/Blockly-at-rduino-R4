@@ -62,7 +62,7 @@
       trashcan:false,
       sounds:false,
       move:{scrollbars:false,drag:false,wheel:false},
-      zoom:{controls:false,wheel:false,pinch:false,startScale:0.72,minScale:0.72,maxScale:0.72},
+      zoom:{controls:false,wheel:false,pinch:false,startScale:0.78,minScale:0.18,maxScale:1.0},
       grid:{spacing:0,length:0,colour:'transparent',snap:false}
     });
 
@@ -111,13 +111,21 @@
       b.render();
     }
 
-    // Deliberately avoid zoomToFit: on a small WebView it can calculate an
-    // unstable scale before Android has completed layout.
-    b.moveBy(18, 18);
-    Blockly.svgResize(ws);
+    // Fit the complete Blockly block into the preview card only after both
+    // Android WebView layout and Blockly rendering have settled.
+    function fitPreview() {
+      Blockly.svgResize(ws);
+      try {
+        ws.zoomToFit();
+        ws.centerOnBlock(b.id);
+      } catch (_) {}
+      Blockly.svgResize(ws);
+    }
 
-    requestAnimationFrame(() => Blockly.svgResize(ws));
-    setTimeout(() => Blockly.svgResize(ws), 120);
+    requestAnimationFrame(() => requestAnimationFrame(fitPreview));
+    setTimeout(fitPreview, 120);
+    setTimeout(fitPreview, 350);
+    window.addEventListener('resize', fitPreview);
   }
 
   function waitForLayout(tries = 0) {
