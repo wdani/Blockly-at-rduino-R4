@@ -39,7 +39,7 @@ Dabei gilt:
 - Ein Tipp auf einen Block eines bereits ausgewählten Verbunds entfernt den gesamten Verbund wieder aus der Auswahl.
 - Shadow-Blöcke und eingebettete Werte werden nicht separat ausgewählt; sie gehören zu ihrem übergeordneten Verbund.
 - Mehrere voneinander getrennte Verbünde können gleichzeitig gewählt werden.
-- Mindestens ein Verbund muss ausgewählt bleiben, damit ein Blueprint erstellt werden kann.
+- Es dürfen auch vorübergehend **null Gruppen** ausgewählt sein; dann ist **Blueprint erstellen** deaktiviert.
 
 Technisch entspricht ein auswählbarer Verbund dem Root-Block und allen über Blockly-Verbindungen dazugehörigen Nachfolgern, Eingabeblöcken, Statement-Blöcken und Shadow-Blöcken.
 
@@ -80,7 +80,8 @@ Regeln:
 - Ein Name darf nicht leer sein.
 - Leerzeichen am Anfang und Ende werden entfernt.
 - Blueprints besitzen intern eine eindeutige ID; gleiche Anzeigenamen sind technisch erlaubt.
-- Abbrechen verwirft nur den Speichervorgang und verändert die Arbeitsfläche nicht.
+- **Abbrechen im Namensdialog** führt zurück in den Blueprint-Auswahlmodus und behält die aktuelle Markierung bei.
+- **Abbrechen in der Auswahlleiste** beendet den Blueprint-Modus vollständig und verändert die Arbeitsfläche nicht.
 
 Nach erfolgreichem Speichern endet der Auswahlmodus und der normale Editor wird wieder aktiv.
 
@@ -114,13 +115,16 @@ Eine Karte enthält in der ersten Version:
 
 - Blueprint-Name;
 - Anzahl der gespeicherten Hauptgruppen;
-- Gesamtzahl der enthaltenen Blöcke;
-- Aktion **Einfügen**.
+- Gesamtzahl der enthaltenen Blöcke.
 
-Zusätzlich braucht jeder Blueprint eine einfache Verwaltung mit:
+Ein normaler Tipp auf die Karte fügt den Blueprint direkt in die Arbeitsfläche ein und schließt anschließend den Browser.
+
+Jede Karte besitzt zusätzlich ein separates Verwaltungsmenü mit:
 
 - **Umbenennen**
 - **Löschen**
+
+Damit kann ein versehentliches Löschen nicht mit dem normalen Einfügen verwechselt werden.
 
 Eine grafische Mehrblock-Vorschau ist für die erste Version nicht erforderlich und kann später ergänzt werden.
 
@@ -128,7 +132,7 @@ Wenn noch keine Blueprints vorhanden sind, erklärt eine leere Ansicht kurz, wie
 
 ## Einfügen eines Blueprints
 
-Beim Antippen eines Blueprints im Browser wird er als neue Kopie in den aktuellen Workspace eingefügt.
+Beim Antippen einer Blueprint-Karte im Browser wird sie als neue Kopie in den aktuellen Workspace eingefügt.
 
 Dabei gilt:
 
@@ -272,15 +276,17 @@ Automatisierte Tests decken mindestens ab:
 1. Ein Tipp innerhalb eines verbundenen Stapels löst immer denselben Root-Verbund auf.
 2. Auswahl eines zweiten getrennten Verbunds ergänzt die Auswahl.
 3. Erneuter Tipp entfernt genau diesen Verbund.
-4. Shadow-Blöcke werden nicht als eigene Gruppe behandelt.
-5. Serialisierung mehrerer Gruppen erhält interne Verbindungen.
-6. Relative Gruppenpositionen werden normalisiert und erhalten.
-7. Ein eingefügter Blueprint erzeugt neue Block-IDs.
-8. Löschen des Originals nach dem Speichern verändert den Blueprint nicht.
-9. Umbenennen verändert nur Metadaten, nicht den Payload.
-10. Löschen eines Blueprints entfernt ihn aus der persistenten Sammlung.
-11. Abbrechen des Auswahlmodus verändert den Workspace nicht.
-12. Die bestehende Block-Kontextfunktion aus Hybrid 14 bleibt außerhalb des Blueprint-Modus funktionsfähig.
+4. Die Auswahl darf leer werden; Erstellen ist dann nicht möglich.
+5. Shadow-Blöcke werden nicht als eigene Gruppe behandelt.
+6. Serialisierung mehrerer Gruppen erhält interne Verbindungen.
+7. Relative Gruppenpositionen werden normalisiert und erhalten.
+8. Ein eingefügter Blueprint erzeugt neue Block-IDs.
+9. Löschen des Originals nach dem Speichern verändert den Blueprint nicht.
+10. Umbenennen verändert nur Metadaten, nicht den Payload.
+11. Löschen eines Blueprints entfernt ihn aus der persistenten Sammlung.
+12. Abbrechen des Auswahlmodus verändert den Workspace nicht.
+13. Abbrechen des Namensdialogs erhält die aktuelle Auswahl.
+14. Die bestehende Block-Kontextfunktion aus Hybrid 14 bleibt außerhalb des Blueprint-Modus funktionsfähig.
 
 Der Android-CI-Build darf erst nach erfolgreichen Blueprint-/Block-Action-Tests fortfahren.
 
