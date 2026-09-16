@@ -1,15 +1,17 @@
 package ch.elekto.blocklyrduino.r4
 
 import android.annotation.SuppressLint
+import android.graphics.BitmapFactory
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.util.Base64
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
-import org.json.JSONTokener
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,15 +30,15 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CenterFocusStrong
 import androidx.compose.material.icons.filled.Code
-import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material.icons.filled.ZoomOut
-import androidx.compose.material.icons.filled.CenterFocusStrong
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -55,13 +57,14 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -195,7 +198,7 @@ private fun ElektoHybridApp(
                     Column {
                         Text("Elekto Blocks", style = MaterialTheme.typography.titleMedium)
                         Text(
-                            "Hybrid 8 • Blockly-Engine",
+                            "Hybrid 10 • Blockly-Engine",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -485,7 +488,6 @@ private fun ComparisonMeaning(
     }
 }
 
-@SuppressLint("SetJavaScriptEnabled")
 @Composable
 private fun BlocklyBlockPreview(
     id: String,
@@ -514,59 +516,40 @@ private fun BlocklyBlockPreview(
                 )
             }
         } else {
-            key(dataUrl) {
-                AndroidView(
-                    modifier = Modifier.fillMaxSize(),
-                    factory = { context ->
-                        WebView(context).apply {
-                            settings.javaScriptEnabled = false
-                            settings.allowFileAccess = false
-                            settings.allowContentAccess = false
-                            settings.setSupportZoom(false)
-                            isVerticalScrollBarEnabled = false
-                            isHorizontalScrollBarEnabled = false
-                            setBackgroundColor(android.graphics.Color.TRANSPARENT)
-                            val html = """
-                                <!doctype html>
-                                <html>
-                                  <head>
-                                    <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-                                    <style>
-                                      html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent}
-                                      body{display:flex;align-items:center;justify-content:center}
-                                      img{display:block;max-width:92%;max-height:82%;width:auto;height:auto;object-fit:contain}
-                                    </style>
-                                  </head>
-                                  <body><img src="$dataUrl"></body>
-                                </html>
-                            """.trimIndent()
-                            loadDataWithBaseURL(null, html, "text/html", "UTF-8", null)
-                            tag = dataUrl
-                        }
-                    },
-                    update = { view ->
-                        if (view.tag != dataUrl) {
-                            val html = """
-                                <!doctype html>
-                                <html>
-                                  <head>
-                                    <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-                                    <style>
-                                      html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent}
-                                      body{display:flex;align-items:center;justify-content:center}
-                                      img{display:block;max-width:92%;max-height:82%;width:auto;height:auto;object-fit:contain}
-                                    </style>
-                                  </head>
-                                  <body><img src="$dataUrl"></body>
-                                </html>
-                            """.trimIndent()
-                            view.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null)
-                            view.tag = dataUrl
-                        }
+            val imageBitmap = remember(dataUrl) {
+                try {
+                    val encoded = dataUrl.substringAfter("base64,", "")
+                    if (encoded.isBlank()) null
+                    else {
+                        val bytes = Base64.decode(encoded, Base64.DEFAULT)
+                        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
                     }
-                )
+                } catch (_: Exception) {
+                    null
+                }
+            }
+
+            if (imageBitmap == null) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(
+                        "Vorschau konnte nicht geladen werden.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            } else {
+                Box(
+                    modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Image(
+                        bitmap = imageBitmap,
+                        contentDescription = "Vorschau: $id",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Fit
+                    )
+                }
             }
         }
     }
 }
-
