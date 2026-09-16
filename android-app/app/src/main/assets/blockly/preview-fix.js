@@ -32,9 +32,12 @@
         break;
       case 'digital_write':
         block = previewWorkspace.newBlock('elekto_digital_write');
+        block.setFieldValue('13', 'PIN');
+        block.setFieldValue('HIGH', 'STATE');
         break;
       case 'analog_read':
         block = previewWorkspace.newBlock('elekto_analog_read');
+        block.setFieldValue('A0', 'PIN');
         break;
       case 'number':
         block = previewWorkspace.newBlock('math_number');
@@ -64,14 +67,7 @@
         block.setFieldValue('0', 'NUM');
     }
 
-    // Some Blockly block types already own an SVG root after newBlock(),
-    // while others do not. Always ensure that every preview block is fully
-    // rendered before measuring/exporting it.
     if (!block.getSvgRoot?.()) block.initSvg();
-    block.render();
-
-    // Re-render after connecting shadows so the parent geometry and all
-    // connected children have their final positions.
     block.render();
     return block;
   }
@@ -91,7 +87,7 @@
       const value = computed.getPropertyValue(prop);
       if (value) inline += prop + ':' + value + ';';
     }
-    inline += 'visibility:visible;';
+    inline += 'visibility:visible;opacity:1;';
     target.setAttribute('style', inline);
 
     const sourceChildren = source.children;
@@ -101,10 +97,42 @@
     }
   }
 
-  async function renderPreviewPngFixed(id) {
+  function nextFrame() {
+    return new Promise(resolve => requestAnimationFrame(resolve));
+  }
+
+  async function flushBlocklyRendering(block, previewWorkspace) {
+    block.render();
+    Blockly.svgResize(previewWorkspace);
+
+    try {
+      const result = Blockly.renderManagement?.finishQueuedRenders?.();
+      if (result && typeof result.then === 'function') await result;
+    } catch (_) {}
+
+    await nextFrame();
+    await nextFrame();
+    block.render();
+    Blockly.svgResize(previewWorkspace);
+    await new Promise(resolve => setTimeout(resolve, 40));
+  }
+
+  async function renderPreviewOnce(id) {
     const holder = document.createElement('div');
-    holder.style.cssText =
-      'position:fixed;left:-12000px;top:0;width:760px;height:480px;pointer-events:none;';
+    // Keep Chromium's layout/paint engine engaged. Moving the workspace many
+    // screens off-canvas caused simple standalone blocks to intermittently
+    // skip their final SVG layout in Android WebView.
+    holder.style.cssText = [
+      'position:fixed',
+      'left:0',
+      'top:0',
+      'width:760px',
+      'height:480px',
+      'pointer-events:none',
+      'opacity:0.001',
+      'z-index:-1000',
+      'overflow:hidden'
+    ].join(';') + ';';
     document.body.appendChild(holder);
 
     let previewWorkspace = null;
@@ -123,23 +151,15 @@
       });
 
       const block = makePreviewBlock(previewWorkspace, id);
-      block.moveBy(36, 36);
-      Blockly.svgResize(previewWorkspace);
-
-      // Give Blockly two frames to settle connection/shadow geometry.
-      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-      block.render();
-      Blockly.svgResize(previewWorkspace);
+      block.moveBy(40, 40);
+      await flushBlocklyRendering(block, previewWorkspace);
 
       const sourceSvg = previewWorkspace.getParentSvg();
       const blockCanvas = previewWorkspace.getCanvas?.() || sourceSvg.querySelector('.blocklyBlockCanvas');
       if (!blockCanvas) throw new Error('Blockly block canvas fehlt.');
 
-      // The block canvas contains the parent block and every connected shadow
-      // as separate SVG groups. Exporting the full canvas therefore preserves
-      // their correct relative positions, unlike cloning only the parent root.
       const bbox = blockCanvas.getBBox();
-      if (!(bbox.width > 0 && bbox.height > 0)) {
+      if (!(Number.isFinite(bbox.width) && Number.isFinite(bbox.height) && bbox.width > 1 && bbox.height > 1)) {
         throw new Error('Ungültige Blockgröße: ' + bbox.width + 'x' + bbox.height);
       }
 
@@ -193,12 +213,44 @@
     }
   }
 
-  window.Elekto.requestPreview = async function requestPreviewFixed(id) {
+  async function renderPreviewWithRetry(id) {
+    let firstError = null;
     try {
-      const data = await renderPreviewPngFixed(id);
-      window.ElektoAndroid?.setPreview?.(id, data);
+      return await renderPreviewOnce(id);
     } catch (error) {
-      console.error('Preview render failed (Hybrid 11)', id, error);
+      firstError = error;
+      await new Promise(resolve => setTimeout(resolve, 80));
     }
+
+    try {
+      return await renderPreviewOnce(id);
+    } catch (secondError) {
+      throw new Error(
+        'Vorschau ' + id + ' fehlgeschlagen: ' +
+        (secondError?.message || firstError?.message || String(secondError))
+      );
+    }
+  }
+
+  // Serialize preview jobs. Multiple simultaneous hidden Blockly workspaces
+  // proved unreliable in Android WebView, especially for simple blocks.
+  let previewQueue = Promise.resolve();
+  const pending = new Set();
+
+  window.Elekto.requestPreview = function requestPreviewStable(id) {
+    if (pending.has(id)) return;
+    pending.add(id);
+
+    previewQueue = previewQueue
+      .then(async () => {
+        const data = await renderPreviewWithRetry(id);
+        window.ElektoAndroid?.setPreview?.(id, data);
+      })
+      .catch(error => {
+        console.error('Preview render failed (Hybrid 12)', id, error);
+      })
+      .finally(() => {
+        pending.delete(id);
+      });
   };
 })();
