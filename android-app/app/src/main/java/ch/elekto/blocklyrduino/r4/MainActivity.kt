@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
@@ -65,12 +66,21 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.WebViewClientCompat
+import ch.elekto.blocklyrduino.r4.data.BlueprintStore
+import ch.elekto.blocklyrduino.r4.model.BLUEPRINT_SCHEMA_VERSION
+import ch.elekto.blocklyrduino.r4.model.BlueprintRecord
+import ch.elekto.blocklyrduino.r4.ui.BlueprintBrowserList
+import ch.elekto.blocklyrduino.r4.ui.BlueprintDeleteDialog
+import ch.elekto.blocklyrduino.r4.ui.BlueprintNameDialog
+import ch.elekto.blocklyrduino.r4.ui.BlueprintSelectionBar
 import ch.elekto.blocklyrduino.r4.ui.ElektoTheme
+import java.io.File
 import org.json.JSONObject
 
 class MainActivity : ComponentActivity() {
@@ -105,7 +115,10 @@ private class ElektoBridge(
     private val onCode: (String) -> Unit,
     private val onDraggingChanged: (Boolean) -> Unit,
     private val onPreview: (String, String) -> Unit,
-    private val onBlockMenu: (BlockMenuState) -> Unit
+    private val onBlockMenu: (BlockMenuState) -> Unit,
+    private val onBlueprintSelectionChanged: (Boolean, Int) -> Unit,
+    private val onBlueprintPayload: (String) -> Unit,
+    private val onBlueprintError: (String) -> Unit
 ) {
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -124,6 +137,18 @@ private class ElektoBridge(
         mainHandler.post {
             onBlockMenu(BlockMenuState(id, type, collapsed, enabled))
         }
+
+    @JavascriptInterface
+    fun setBlueprintSelection(active: Boolean, groupCount: Int) =
+        mainHandler.post { onBlueprintSelectionChanged(active, groupCount) }
+
+    @JavascriptInterface
+    fun blueprintPayloadReady(payloadJson: String) =
+        mainHandler.post { onBlueprintPayload(payloadJson) }
+
+    @JavascriptInterface
+    fun blueprintError(message: String) =
+        mainHandler.post { onBlueprintError(message) }
 }
 
 private enum class BlockCategory(val title: String) {
@@ -133,6 +158,8 @@ private enum class BlockCategory(val title: String) {
     LOGIC("Logik"),
     LOOPS("Schleifen")
 }
+
+private enum class CatalogMode { BLOCKS, BLUEPRINTS }
 
 private data class CatalogBlock(
     val id: String,
@@ -189,6 +216,11 @@ private fun ElektoHybridApp(
     darkMode: Boolean,
     onToggleTheme: () -> Unit
 ) {
+    val context = LocalContext.current
+    val blueprintStore = remember(context.applicationContext) {
+        BlueprintStore(File(context.filesDir, "blueprints-v1.json"))
+    }
+
     var webView by remember { mutableStateOf<WebView?>(null) }
     var generatedCode by remember { mutableStateOf<String?>(null) }
     var showBlocks by remember { mutableStateOf(false) }
@@ -196,9 +228,23 @@ private fun ElektoHybridApp(
     var previewImages by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var blockMenu by remember { mutableStateOf<BlockMenuState?>(null) }
 
+    var blueprintSelectionActive by remember { mutableStateOf(false) }
+    var blueprintGroupCount by remember { mutableStateOf(0) }
+    var pendingBlueprintPayload by remember { mutableStateOf<String?>(null) }
+    var blueprints by remember { mutableStateOf<List<BlueprintRecord>>(emptyList()) }
+    var renameBlueprint by remember { mutableStateOf<BlueprintRecord?>(null) }
+    var deleteBlueprint by remember { mutableStateOf<BlueprintRecord?>(null) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+
     fun applyEditorTheme(view: WebView?) {
         val name = if (darkMode) "dark" else "light"
         view?.evaluateJavascript("window.Elekto?.setTheme('$name')", null)
+    }
+
+    fun reloadBlueprints() {
+        runCatching { blueprintStore.loadAll() }
+            .onSuccess { blueprints = it }
+            .onFailure { errorMessage = it.message ?: "Blueprints konnten nicht geladen werden." }
     }
 
     fun runBlockAction(state: BlockMenuState, action: String) {
@@ -211,8 +257,62 @@ private fun ElektoHybridApp(
         blockMenu = null
     }
 
+    fun startBlueprintSelection(state: BlockMenuState) {
+        val blockId = JSONObject.quote(state.id)
+        blockMenu = null
+        webView?.evaluateJavascript(
+            "window.Elekto?.startBlueprintSelection($blockId)",
+            null
+        )
+    }
+
+    fun validateAndOpenBlueprintName(payloadJson: String) {
+        runCatching {
+            val payload = JSONObject(payloadJson)
+            require(payload.optInt("schemaVersion", -1) == BLUEPRINT_SCHEMA_VERSION)
+            require(payload.optInt("groupCount", 0) > 0)
+            require(payload.optInt("blockCount", 0) > 0)
+            payloadJson
+        }.onSuccess {
+            pendingBlueprintPayload = it
+        }.onFailure {
+            errorMessage = "Der Blueprint konnte nicht vorbereitet werden."
+        }
+    }
+
+    fun savePendingBlueprint(name: String) {
+        val raw = pendingBlueprintPayload ?: return
+        runCatching {
+            val payload = JSONObject(raw)
+            blueprintStore.create(
+                name = name,
+                payloadJson = raw,
+                groupCount = payload.getInt("groupCount"),
+                blockCount = payload.getInt("blockCount")
+            )
+        }.onSuccess {
+            reloadBlueprints()
+            pendingBlueprintPayload = null
+            blueprintSelectionActive = false
+            blueprintGroupCount = 0
+            webView?.evaluateJavascript("window.Elekto?.commitBlueprintSelection()", null)
+        }.onFailure {
+            errorMessage = it.message ?: "Blueprint konnte nicht gespeichert werden."
+        }
+    }
+
+    fun insertBlueprint(blueprint: BlueprintRecord) {
+        val payload = JSONObject.quote(blueprint.payloadJson)
+        showBlocks = false
+        webView?.evaluateJavascript("window.Elekto?.insertBlueprint($payload)", null)
+    }
+
     LaunchedEffect(darkMode, webView) {
         applyEditorTheme(webView)
+    }
+
+    LaunchedEffect(blueprintStore) {
+        reloadBlueprints()
     }
 
     Scaffold(
@@ -224,20 +324,29 @@ private fun ElektoHybridApp(
                     Column {
                         Text("Elekto Blocks", style = MaterialTheme.typography.titleMedium)
                         Text(
-                            "Hybrid 14 • Blockly-Engine",
+                            "Hybrid 15 • Blockly-Engine",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 },
                 actions = {
-                    IconButton(onClick = { webView?.evaluateJavascript("window.Elekto?.undo()", null) }) {
+                    IconButton(
+                        enabled = !blueprintSelectionActive,
+                        onClick = { webView?.evaluateJavascript("window.Elekto?.undo()", null) }
+                    ) {
                         Icon(Icons.Default.Undo, contentDescription = "Rückgängig")
                     }
-                    IconButton(onClick = { webView?.evaluateJavascript("window.Elekto?.redo()", null) }) {
+                    IconButton(
+                        enabled = !blueprintSelectionActive,
+                        onClick = { webView?.evaluateJavascript("window.Elekto?.redo()", null) }
+                    ) {
                         Icon(Icons.Default.Redo, contentDescription = "Wiederholen")
                     }
-                    IconButton(onClick = { webView?.evaluateJavascript("window.Elekto?.requestCode()", null) }) {
+                    IconButton(
+                        enabled = !blueprintSelectionActive,
+                        onClick = { webView?.evaluateJavascript("window.Elekto?.requestCode()", null) }
+                    ) {
                         Icon(Icons.Default.Code, contentDescription = "Arduino-Code anzeigen")
                     }
                     IconButton(onClick = onToggleTheme) {
@@ -250,47 +359,49 @@ private fun ElektoHybridApp(
             )
         },
         floatingActionButton = {
-            if (isDraggingBlock) {
-                Surface(
-                    modifier = Modifier.width(126.dp).height(76.dp),
-                    shape = RoundedCornerShape(24.dp),
-                    color = MaterialTheme.colorScheme.errorContainer,
-                    shadowElevation = 8.dp
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
+            if (!blueprintSelectionActive) {
+                if (isDraggingBlock) {
+                    Surface(
+                        modifier = Modifier.width(126.dp).height(76.dp),
+                        shape = RoundedCornerShape(24.dp),
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        shadowElevation = 8.dp
                     ) {
-                        Icon(
-                            Icons.Default.DeleteForever,
-                            contentDescription = "Block löschen",
-                            tint = MaterialTheme.colorScheme.error
-                        )
-                        Text(
-                            "Hier löschen",
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                            fontWeight = FontWeight.Bold
-                        )
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                Icons.Default.DeleteForever,
+                                contentDescription = "Block löschen",
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                            Text(
+                                "Hier löschen",
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
+                } else {
+                    ExtendedFloatingActionButton(
+                        onClick = { showBlocks = true },
+                        icon = { Text("+", style = MaterialTheme.typography.headlineSmall) },
+                        text = { Text("Blöcke") }
+                    )
                 }
-            } else {
-                ExtendedFloatingActionButton(
-                    onClick = { showBlocks = true },
-                    icon = { Text("+", style = MaterialTheme.typography.headlineSmall) },
-                    text = { Text("Blöcke") }
-                )
             }
         }
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
-                factory = { context ->
+                factory = { androidContext ->
                     val loader = WebViewAssetLoader.Builder()
-                        .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(context))
+                        .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(androidContext))
                         .build()
 
-                    WebView(context).apply {
+                    WebView(androidContext).apply {
                         settings.javaScriptEnabled = true
                         settings.domStorageEnabled = true
                         settings.allowFileAccess = false
@@ -301,13 +412,26 @@ private fun ElektoHybridApp(
                         addJavascriptInterface(
                             ElektoBridge(
                                 onCode = { generatedCode = it },
-                                onDraggingChanged = { isDraggingBlock = it },
+                                onDraggingChanged = { active ->
+                                    if (!blueprintSelectionActive) isDraggingBlock = active
+                                },
                                 onPreview = { id, data ->
                                     previewImages = previewImages + (id to data)
                                 },
                                 onBlockMenu = { state ->
-                                    isDraggingBlock = false
-                                    blockMenu = state
+                                    if (!blueprintSelectionActive) {
+                                        isDraggingBlock = false
+                                        blockMenu = state
+                                    }
+                                },
+                                onBlueprintSelectionChanged = { active, count ->
+                                    blueprintSelectionActive = active
+                                    blueprintGroupCount = count.coerceAtLeast(0)
+                                    if (active) isDraggingBlock = false
+                                },
+                                onBlueprintPayload = { validateAndOpenBlueprintName(it) },
+                                onBlueprintError = {
+                                    errorMessage = it.ifBlank { "Blueprint-Aktion fehlgeschlagen." }
                                 }
                             ),
                             "ElektoAndroid"
@@ -333,28 +457,46 @@ private fun ElektoHybridApp(
                 }
             )
 
-            Surface(
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(start = 14.dp, bottom = 14.dp),
-                shape = RoundedCornerShape(24.dp),
-                tonalElevation = 5.dp,
-                shadowElevation = 4.dp
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+            if (!blueprintSelectionActive) {
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(start = 14.dp, bottom = 14.dp),
+                    shape = RoundedCornerShape(24.dp),
+                    tonalElevation = 5.dp,
+                    shadowElevation = 4.dp
                 ) {
-                    IconButton(onClick = { webView?.evaluateJavascript("window.Elekto?.zoomOut()", null) }) {
-                        Icon(Icons.Default.ZoomOut, contentDescription = "Verkleinern")
-                    }
-                    IconButton(onClick = { webView?.evaluateJavascript("window.Elekto?.resetZoom()", null) }) {
-                        Icon(Icons.Default.CenterFocusStrong, contentDescription = "Ansicht zurücksetzen")
-                    }
-                    IconButton(onClick = { webView?.evaluateJavascript("window.Elekto?.zoomIn()", null) }) {
-                        Icon(Icons.Default.ZoomIn, contentDescription = "Vergrößern")
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                    ) {
+                        IconButton(onClick = { webView?.evaluateJavascript("window.Elekto?.zoomOut()", null) }) {
+                            Icon(Icons.Default.ZoomOut, contentDescription = "Verkleinern")
+                        }
+                        IconButton(onClick = { webView?.evaluateJavascript("window.Elekto?.resetZoom()", null) }) {
+                            Icon(Icons.Default.CenterFocusStrong, contentDescription = "Ansicht zurücksetzen")
+                        }
+                        IconButton(onClick = { webView?.evaluateJavascript("window.Elekto?.zoomIn()", null) }) {
+                            Icon(Icons.Default.ZoomIn, contentDescription = "Vergrößern")
+                        }
                     }
                 }
+            } else {
+                BlueprintSelectionBar(
+                    groupCount = blueprintGroupCount,
+                    onCancel = {
+                        pendingBlueprintPayload = null
+                        blueprintSelectionActive = false
+                        blueprintGroupCount = 0
+                        webView?.evaluateJavascript("window.Elekto?.cancelBlueprintSelection()", null)
+                    },
+                    onCreate = {
+                        webView?.evaluateJavascript("window.Elekto?.requestBlueprintPayload()", null)
+                    },
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(horizontal = 14.dp, vertical = 14.dp)
+                )
             }
         }
     }
@@ -364,11 +506,15 @@ private fun ElektoHybridApp(
             darkMode = darkMode,
             editorWebView = webView,
             previewImages = previewImages,
+            blueprints = blueprints,
             onDismiss = { showBlocks = false },
             onAdd = { id ->
                 webView?.evaluateJavascript("window.Elekto?.addBlock('$id')", null)
                 showBlocks = false
-            }
+            },
+            onInsertBlueprint = ::insertBlueprint,
+            onRenameBlueprint = { renameBlueprint = it },
+            onDeleteBlueprint = { deleteBlueprint = it }
         )
     }
 
@@ -376,7 +522,53 @@ private fun ElektoHybridApp(
         BlockContextSheet(
             state = state,
             onDismiss = { blockMenu = null },
-            onAction = { action -> runBlockAction(state, action) }
+            onAction = { action -> runBlockAction(state, action) },
+            onStartBlueprint = { startBlueprintSelection(state) }
+        )
+    }
+
+    pendingBlueprintPayload?.let {
+        BlueprintNameDialog(
+            title = "Blueprint speichern",
+            confirmLabel = "Speichern",
+            onDismiss = { pendingBlueprintPayload = null },
+            onConfirm = ::savePendingBlueprint
+        )
+    }
+
+    renameBlueprint?.let { blueprint ->
+        BlueprintNameDialog(
+            title = "Blueprint umbenennen",
+            confirmLabel = "Umbenennen",
+            initialName = blueprint.name,
+            onDismiss = { renameBlueprint = null },
+            onConfirm = { newName ->
+                runCatching { blueprintStore.rename(blueprint.id, newName) }
+                    .onSuccess {
+                        reloadBlueprints()
+                        renameBlueprint = null
+                    }
+                    .onFailure {
+                        errorMessage = it.message ?: "Blueprint konnte nicht umbenannt werden."
+                    }
+            }
+        )
+    }
+
+    deleteBlueprint?.let { blueprint ->
+        BlueprintDeleteDialog(
+            blueprintName = blueprint.name,
+            onDismiss = { deleteBlueprint = null },
+            onConfirm = {
+                runCatching { blueprintStore.delete(blueprint.id) }
+                    .onSuccess {
+                        reloadBlueprints()
+                        deleteBlueprint = null
+                    }
+                    .onFailure {
+                        errorMessage = it.message ?: "Blueprint konnte nicht gelöscht werden."
+                    }
+            }
         )
     }
 
@@ -387,6 +579,17 @@ private fun ElektoHybridApp(
             text = { Text(code, style = MaterialTheme.typography.bodySmall) },
             confirmButton = {
                 TextButton(onClick = { generatedCode = null }) { Text("Schließen") }
+            }
+        )
+    }
+
+    errorMessage?.let { message ->
+        AlertDialog(
+            onDismissRequest = { errorMessage = null },
+            title = { Text("Blueprint-Fehler") },
+            text = { Text(message) },
+            confirmButton = {
+                TextButton(onClick = { errorMessage = null }) { Text("OK") }
             }
         )
     }
@@ -408,7 +611,8 @@ private fun blockDisplayName(type: String): String = when (type) {
 private fun BlockContextSheet(
     state: BlockMenuState,
     onDismiss: () -> Unit,
-    onAction: (String) -> Unit
+    onAction: (String) -> Unit,
+    onStartBlueprint: () -> Unit
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
@@ -430,6 +634,11 @@ private fun BlockContextSheet(
                 title = "Duplizieren",
                 description = "Erstellt eine Kopie. Bei einem verbundenen Stapel werden die darunterliegenden Blöcke mitkopiert.",
                 onClick = { onAction("duplicate") }
+            )
+            BlockActionCard(
+                title = "Als Blueprint speichern",
+                description = "Wählt diesen verbundenen Stapel aus. Danach kannst du weitere Stapel hinzufügen.",
+                onClick = onStartBlueprint
             )
             BlockActionCard(
                 title = if (state.collapsed) "Ausklappen" else "Einklappen",
@@ -495,10 +704,15 @@ private fun BlockCatalogSheet(
     darkMode: Boolean,
     editorWebView: WebView?,
     previewImages: Map<String, String>,
+    blueprints: List<BlueprintRecord>,
     onDismiss: () -> Unit,
-    onAdd: (String) -> Unit
+    onAdd: (String) -> Unit,
+    onInsertBlueprint: (BlueprintRecord) -> Unit,
+    onRenameBlueprint: (BlueprintRecord) -> Unit,
+    onDeleteBlueprint: (BlueprintRecord) -> Unit
 ) {
     var category by remember { mutableStateOf(BlockCategory.BASICS) }
+    var mode by rememberSaveable { mutableStateOf(CatalogMode.BLOCKS) }
     val visible = catalog.filter { it.category == category }
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -507,57 +721,83 @@ private fun BlockCatalogSheet(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text("Blöcke auswählen", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-            Text(
-                "Die Vorschau ist derselbe Blockly-Block, der später auf der Arbeitsfläche liegt.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
 
-            LazyRow(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(BlockCategory.entries) { item ->
-                    FilterChip(
-                        selected = category == item,
-                        onClick = { category = item },
-                        label = { Text(item.title) }
-                    )
-                }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = mode == CatalogMode.BLOCKS,
+                    onClick = { mode = CatalogMode.BLOCKS },
+                    label = { Text("Blöcke") }
+                )
+                FilterChip(
+                    selected = mode == CatalogMode.BLUEPRINTS,
+                    onClick = { mode = CatalogMode.BLUEPRINTS },
+                    label = { Text("Blueprints") }
+                )
             }
 
-            LazyColumn(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                items(visible, key = { it.id }) { block ->
-                    Card(
-                        onClick = { onAdd(block.id) },
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
-                    ) {
-                        Column(
-                            modifier = Modifier.fillMaxWidth().padding(14.dp),
-                            verticalArrangement = Arrangement.spacedBy(9.dp)
-                        ) {
-                            Text(block.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                            BlocklyBlockPreview(
-                                id = block.id,
-                                darkMode = darkMode,
-                                editorWebView = editorWebView,
-                                dataUrl = previewImages[block.id]
-                            )
-                            Text(block.description, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            if (block.id == "compare") {
-                                ComparisonLegend()
-                            }
-                            Text(
-                                block.example,
-                                style = MaterialTheme.typography.bodySmall,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
+            if (mode == CatalogMode.BLOCKS) {
+                Text(
+                    "Die Vorschau ist derselbe Blockly-Block, der später auf der Arbeitsfläche liegt.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(BlockCategory.entries) { item ->
+                        FilterChip(
+                            selected = category == item,
+                            onClick = { category = item },
+                            label = { Text(item.title) }
+                        )
                     }
                 }
-                item { Spacer(Modifier.height(28.dp)) }
+
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 520.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    items(visible, key = { it.id }) { block ->
+                        Card(
+                            onClick = { onAdd(block.id) },
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
+                        ) {
+                            Column(
+                                modifier = Modifier.fillMaxWidth().padding(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(9.dp)
+                            ) {
+                                Text(block.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                BlocklyBlockPreview(
+                                    id = block.id,
+                                    darkMode = darkMode,
+                                    editorWebView = editorWebView,
+                                    dataUrl = previewImages[block.id]
+                                )
+                                Text(block.description, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                if (block.id == "compare") ComparisonLegend()
+                                Text(
+                                    block.example,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                    }
+                    item { Spacer(Modifier.height(28.dp)) }
+                }
+            } else {
+                Text(
+                    "Gespeicherte Blockkombinationen kannst du mit einem Tipp wieder einfügen.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                BlueprintBrowserList(
+                    blueprints = blueprints,
+                    onInsert = onInsertBlueprint,
+                    onRename = onRenameBlueprint,
+                    onDelete = onDeleteBlueprint,
+                    modifier = Modifier.heightIn(max = 520.dp)
+                )
             }
         }
     }
@@ -631,10 +871,7 @@ private fun BlocklyBlockPreview(
     dataUrl: String?
 ) {
     LaunchedEffect(id, darkMode, editorWebView) {
-        editorWebView?.evaluateJavascript(
-            "window.Elekto?.requestPreview('$id')",
-            null
-        )
+        editorWebView?.evaluateJavascript("window.Elekto?.requestPreview('$id')", null)
     }
 
     Surface(
