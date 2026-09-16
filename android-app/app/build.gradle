@@ -24,8 +24,8 @@ android {
         applicationId 'ch.elekto.blocklyrduino.r4.blocklypoc'
         minSdk 26
         targetSdk 35
-        versionCode 18
-        versionName '0.13.0-hybrid.12'
+        versionCode 19
+        versionName '0.14.0-hybrid.13'
     }
 
     buildTypes {
