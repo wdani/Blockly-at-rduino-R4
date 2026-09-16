@@ -32,9 +32,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CenterFocusStrong
 import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.LightMode
-import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material.icons.filled.ZoomIn
@@ -71,6 +71,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.WebViewClientCompat
 import ch.elekto.blocklyrduino.r4.ui.ElektoTheme
+import org.json.JSONObject
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -93,10 +94,18 @@ private fun ElektoRoot() {
     }
 }
 
+private data class BlockMenuState(
+    val id: String,
+    val type: String,
+    val collapsed: Boolean,
+    val enabled: Boolean
+)
+
 private class ElektoBridge(
     private val onCode: (String) -> Unit,
     private val onDraggingChanged: (Boolean) -> Unit,
-    private val onPreview: (String, String) -> Unit
+    private val onPreview: (String, String) -> Unit,
+    private val onBlockMenu: (BlockMenuState) -> Unit
 ) {
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -109,6 +118,12 @@ private class ElektoBridge(
     @JavascriptInterface
     fun setPreview(id: String, dataUrl: String) =
         mainHandler.post { onPreview(id, dataUrl) }
+
+    @JavascriptInterface
+    fun showBlockMenu(id: String, type: String, collapsed: Boolean, enabled: Boolean) =
+        mainHandler.post {
+            onBlockMenu(BlockMenuState(id, type, collapsed, enabled))
+        }
 }
 
 private enum class BlockCategory(val title: String) {
@@ -179,10 +194,21 @@ private fun ElektoHybridApp(
     var showBlocks by remember { mutableStateOf(false) }
     var isDraggingBlock by remember { mutableStateOf(false) }
     var previewImages by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var blockMenu by remember { mutableStateOf<BlockMenuState?>(null) }
 
     fun applyEditorTheme(view: WebView?) {
         val name = if (darkMode) "dark" else "light"
         view?.evaluateJavascript("window.Elekto?.setTheme('$name')", null)
+    }
+
+    fun runBlockAction(state: BlockMenuState, action: String) {
+        val blockId = JSONObject.quote(state.id)
+        val actionName = JSONObject.quote(action)
+        webView?.evaluateJavascript(
+            "window.Elekto?.blockAction($blockId,$actionName)",
+            null
+        )
+        blockMenu = null
     }
 
     LaunchedEffect(darkMode, webView) {
@@ -198,7 +224,7 @@ private fun ElektoHybridApp(
                     Column {
                         Text("Elekto Blocks", style = MaterialTheme.typography.titleMedium)
                         Text(
-                            "Hybrid 10 • Blockly-Engine",
+                            "Hybrid 14 • Blockly-Engine",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -278,6 +304,10 @@ private fun ElektoHybridApp(
                                 onDraggingChanged = { isDraggingBlock = it },
                                 onPreview = { id, data ->
                                     previewImages = previewImages + (id to data)
+                                },
+                                onBlockMenu = { state ->
+                                    isDraggingBlock = false
+                                    blockMenu = state
                                 }
                             ),
                             "ElektoAndroid"
@@ -342,6 +372,14 @@ private fun ElektoHybridApp(
         )
     }
 
+    blockMenu?.let { state ->
+        BlockContextSheet(
+            state = state,
+            onDismiss = { blockMenu = null },
+            onAction = { action -> runBlockAction(state, action) }
+        )
+    }
+
     generatedCode?.let { code ->
         AlertDialog(
             onDismissRequest = { generatedCode = null },
@@ -351,6 +389,103 @@ private fun ElektoHybridApp(
                 TextButton(onClick = { generatedCode = null }) { Text("Schließen") }
             }
         )
+    }
+}
+
+private fun blockDisplayName(type: String): String = when (type) {
+    "elekto_delay" -> "Warten"
+    "elekto_digital_write" -> "Digitaler Ausgang"
+    "elekto_analog_read" -> "Analogwert"
+    "math_number" -> "Zahl"
+    "logic_compare" -> "Zahlen vergleichen"
+    "elekto_if" -> "Wenn"
+    "elekto_repeat" -> "Wiederholen"
+    else -> "Block"
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun BlockContextSheet(
+    state: BlockMenuState,
+    onDismiss: () -> Unit,
+    onAction: (String) -> Unit
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                "Block-Optionen",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                blockDisplayName(state.type),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            BlockActionCard(
+                title = "Duplizieren",
+                description = "Erstellt eine Kopie. Bei einem verbundenen Stapel werden die darunterliegenden Blöcke mitkopiert.",
+                onClick = { onAction("duplicate") }
+            )
+            BlockActionCard(
+                title = if (state.collapsed) "Ausklappen" else "Einklappen",
+                description = if (state.collapsed)
+                    "Zeigt den Block wieder vollständig an."
+                else
+                    "Macht den Block kompakter, ohne ihn zu löschen.",
+                onClick = { onAction("toggleCollapsed") }
+            )
+            BlockActionCard(
+                title = if (state.enabled) "Deaktivieren" else "Aktivieren",
+                description = if (state.enabled)
+                    "Der Block bleibt sichtbar, wird aber beim Arduino-Code übersprungen."
+                else
+                    "Der Block wird wieder beim Arduino-Code berücksichtigt.",
+                onClick = { onAction("toggleEnabled") }
+            )
+            BlockActionCard(
+                title = "Löschen",
+                description = "Entfernt den Block und die damit verbundenen Unterblöcke.",
+                danger = true,
+                onClick = { onAction("delete") }
+            )
+            Spacer(Modifier.height(18.dp))
+        }
+    }
+}
+
+@Composable
+private fun BlockActionCard(
+    title: String,
+    description: String,
+    danger: Boolean = false,
+    onClick: () -> Unit
+) {
+    val container = if (danger) MaterialTheme.colorScheme.errorContainer
+    else MaterialTheme.colorScheme.surfaceContainerHigh
+    val foreground = if (danger) MaterialTheme.colorScheme.onErrorContainer
+    else MaterialTheme.colorScheme.onSurface
+
+    Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = container)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 13.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(title, fontWeight = FontWeight.Bold, color = foreground)
+            Text(
+                description,
+                style = MaterialTheme.typography.bodySmall,
+                color = foreground.copy(alpha = 0.82f)
+            )
+        }
     }
 }
 
