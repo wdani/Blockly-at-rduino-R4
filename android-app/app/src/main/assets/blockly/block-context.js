@@ -43,6 +43,7 @@
   }
 
   document.addEventListener('pointerdown', event => {
+    if (window.Elekto?.isBlueprintSelectionActive?.()) return;
     if (event.button != null && event.button !== 0) return;
     const block = findBlockFromTarget(event.target);
     if (!block) return;
